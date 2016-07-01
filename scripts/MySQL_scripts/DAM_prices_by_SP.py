@@ -63,15 +63,28 @@ class Query_DAM_by_SP(Query_ERCOT_DB):
         self.dflzhub = self.df[lzhub]
         self.features = []
         if model_type == "A":
-            for dt,price in self.dflzhub.iteritems():
+            for dt, price in self.dflzhub.iteritems():
                 pred_hour_index = self.dflzhub.index.get_loc(dt)
                 if pred_hour_index - 7*24 >= 0:
-                    self.features.append([work_day_or_holiday(string_to_date(dt)),                                           string_to_date(dt).hour,                                           string_to_date(dt).weekday()]                                          + self.dflzhub.iloc[pred_hour_index - 2*24:pred_hour_index - 1*24].tolist()                                          + self.dflzhub.iloc[pred_hour_index - 7*24:pred_hour_index - 6*24].tolist())
-            self.feature_labels = ['Holiday','Hour','Day']                                + [('P(h-%s)' % str(i+1)) for i in range(24,48)][::-1]                                + [('P(h-%s)' % str(i+1)) for i in range(144,168)][::-1]
-                
+                    self.features.append([work_day_or_holiday(string_to_date(dt)),\
+                                          string_to_date(dt).hour,\
+                                          string_to_date(dt).weekday()]\
+                                          + self.dflzhub.iloc[pred_hour_index - 2*24:pred_hour_index - 1*24].tolist()\
+                                          + self.dflzhub.iloc[pred_hour_index - 7*24:pred_hour_index - 6*24].tolist())
+            self.feature_labels = ['Holiday', 'Hour', 'Day']\
+                                  + [('P(h-%s)' % str(i+1)) for i in range(24,48)][::-1]\
+                                  + [('P(h-%s)' % str(i+1)) for i in range(144,168)][::-1]
+            numerical_features = ['Hour']\
+                                 + [('P(h-%s)' % str(i+1)) for i in range(24,48)][::-1]\
+                                 + [('P(h-%s)' % str(i+1)) for i in range(144,168)][::-1]
             self.idx_wout_1st_week = list(self.dflzhub.index.values)[7*24:]
-            self.features_df = pd.DataFrame(data = self.features,                                            index = self.idx_wout_1st_week,                                            columns = self.feature_labels)
-            self.features_df = encode_onehot(self.features_df,'Day')
+            self.features_df = pd.DataFrame(data = self.features, \
+                                            index = self.idx_wout_1st_week, \
+                                            columns = self.feature_labels)
+            min_max_scale(self.features_df, numerical_features)
+            self.features_df = encode_onehot(self.features_df, 'Day')
+            #normalize numerical values
+
             return self.features_df.join(self.dflzhub,how='left')
     
    
@@ -139,14 +152,16 @@ def encode_onehot(df, cols):
     enc = preprocessing.OneHotEncoder()
     index = df[cols].index
     data = enc.fit_transform(df[cols].reshape(-1,1)).toarray()
-    one_hot_df = pd.DataFrame(data = data,                              index = index,                              columns = [cols + '%s' % i for i in range(data.shape[1])])
+    one_hot_df = pd.DataFrame(data = data, index = index, columns = [cols + '%s' % i for i in range(data.shape[1])])
     del df[cols]
     return df.join(one_hot_df,how='inner')
 
+def min_max_scale(df,cols):
+    min_max_scaler = preprocessing.MinMaxScaler()
+    df[cols] = min_max_scaler.fit_transform(df[cols])
 
-
-#qdsp = Query_DAM_by_SP()
-#qdsp.query("2012-01-01","2012-12-31")
+# qdsp = Query_DAM_by_SP()
+# qdsp.query("2012-01-01","2012-12-31")
 #qdsp.plot()
 #feature_targets = qdsp.construct_feature_vector_matrix("HB_BUSAVG","A")
 
