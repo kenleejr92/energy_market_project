@@ -1,7 +1,6 @@
 
 # coding: utf-8
 
-# In[10]:
 
 """
 Output Layer for an MLP used for regression
@@ -91,9 +90,11 @@ class OutputLayer(object):
         if y.dtype.startswith('float'):
             # the T.neq operator returns a vector of 0s and 1s, where 1
             # represents a mistake in prediction
-            return T.mean((y-self.y_pred.T)**2)
+            return T.mean(abs((y-self.y_pred.T)/y))
         else:
             raise NotImplementedError()
+
+
 
 def load_data():
 
@@ -104,7 +105,7 @@ def load_data():
     
     # Load the dataset
     qdsp = Query_DAM_by_SP()
-    qdsp.query("2015-01-01","2015-12-31")
+    qdsp.query("2013-01-01","2013-12-31")
     feature_targets = qdsp.construct_feature_vector_matrix("HB_BUSAVG","A")
     train_set, val_set, test_set = train_test_validate(feature_targets)
     # train_set, valid_set, test_set format: tuple(input, target)
@@ -229,3 +230,4 @@ def test_linreg():
     print(pred)
     print(linreg.W.eval())
     print(linreg.b.eval())
+

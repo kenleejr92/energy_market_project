@@ -1,4 +1,4 @@
-
+# coding: utf-8
 
 import sys
 import numpy as np
@@ -15,12 +15,22 @@ from sklearn import datasets
 from sklearn import preprocessing
 from Query_ERCOT_DB import Query_ERCOT_DB
 
+MONTHS_PER_YEAR = 12
+DAYS_PER_MONTH = 30
+HRS_PER_DAY = 24
 
-
-#Acquire DAM SPP for the different settlementpoints for a specific date range
+# Acquire DAM SPP for all settlement points for a specific date range
 class Query_DAM_by_SP(Query_ERCOT_DB):
+    # list of settlement points is common across all instances of the DAM_by_SP class
     settlement_points = []
-        
+
+    '''
+    Query the list of settlement points and remove the heading "Settlement Point"
+    self.start_date - start date of query
+    self.end_date - end date of query
+    self.dts - list of date_time objects in the query result
+    self.df - pandas data frame representing the query result
+    '''
     def __init__(self):
         Query_ERCOT_DB.c.execute("""SELECT DISTINCT settlement_point FROM DAM_prices_by_SPP""")
         r = list(Query_ERCOT_DB.c.fetchall())
@@ -28,73 +38,103 @@ class Query_DAM_by_SP(Query_ERCOT_DB):
             if settlement_point[0] == "\"Settlement Point\"":
                 continue
             self.settlement_points.append(settlement_point[0])
+        self.start_date = None
+        self.end_date = None
+        self.dts = None
+        self.df = None
     
-    #query for all prices for all load zones and hubs for specified date range
-    def query(self,sd,ed):
+    '''
+    Query for all prices for all load zones and hubs for specified date range
+    Creates a pandas data frame of the query
+    '''
+    def query(self, sd, ed):
         self.start_date = sd
         self.end_date = ed
-        self.result_dict = {}
-        for (idx,val) in enumerate(self.settlement_points):
+        result_dict = {}
+        for (idx, val) in enumerate(self.settlement_points):
             Query_ERCOT_DB.c.execute("""SELECT delivery_date,hour_ending,spp 
                 FROM DAM_prices_by_SPP 
                 WHERE settlement_point = "%s" 
                 AND delivery_date > "%s" 
                 AND delivery_date < "%s" 
-                ORDER BY delivery_date,hour_ending""" % (val,self.start_date,self.end_date))
-            self.result = list(Query_ERCOT_DB.c.fetchall())
-            self.result_dict[val] = self.result
-        self.spp_dict = {}
+                ORDER BY delivery_date,hour_ending""" % (val, sd, ed))
+            result = list(Query_ERCOT_DB.c.fetchall())
+            result_dict[val] = result
+        spp_dict = {}
         self.dts = []
-        self.count = 0
-        for bus_name,result in self.result_dict.iteritems():
-            self.spps = []
-            for (date,time,spp) in self.result:
+        count = 0
+        for bus_name, result in result_dict.iteritems():
+            spps = []
+            for (date, time, spp) in result:
                 time = str(int(time.split(":")[0])-1)
                 dt = datetime.strptime(date + " " + time, "%Y-%m-%d %H")
-                self.spps.append(float(spp))
-                if self.count == 0:
+                spps.append(float(spp))
+                if count == 0:
                     self.dts.append(dt)
-            self.count = self.count + 1
-            self.spp_dict[bus_name] = self.spps
-        self.string_dts = [dt.strftime("%Y-%m-%d %H") for dt in self.dts]
-        self.df = pd.DataFrame(data = self.spp_dict, index = self.string_dts)
-        
-    def construct_feature_vector_matrix(self,lzhub,model_type):
-        self.dflzhub = self.df[lzhub]
-        self.features = []
+            count = count + 1
+            spp_dict[bus_name] = spps
+        string_dts = [dt.strftime("%Y-%m-%d %H") for dt in self.dts]
+        self.df = pd.DataFrame(data=spp_dict, index=string_dts)
+
+    '''
+    Given a load zone or hub, creates a feature data frame for the specified model
+    Model A (Benchmark):
+        Input1: Day-Type indicator
+        Input2: Hour indicator
+        Input3: Holiday indicator
+        Input4: Hourly price of day d-1
+        Input5: Hourly price of day d-7
+    Model B (more historical price data):
+        Input 1: Day type indicator, i.e. ‘‘1” for Sunday, ‘‘2” for Monday
+        Input 2: Hour indicator, i.e. ‘‘1”, ‘‘2”, . . ., ‘‘24”.
+        Input 3: Holiday indicator, i.e. ‘‘1” for holidays and ‘‘0” for working days and weekends.
+        Input 4: Price of hour h-24.
+        Input 5: Price of hour h-25.
+        Input 6: Price of hour h-47.
+        Input 7: Price of hour h-48.
+        Input 8: Price of hour h-72.
+        Input 9: Price of hour h-96.
+        Input 10: Price of hour h-120.
+        Input 11: Price of hour h-144.
+        Input 12: Price of hour h-167.
+        Input 13: Price of hour h-168.
+    Model C (exogenous variables):
+    '''
+    def construct_feature_vector_matrix(self, lzhub, model_type):
+        dflzhub = self.df[lzhub]
+        features = []
         if model_type == "A":
-            for dt, price in self.dflzhub.iteritems():
-                pred_hour_index = self.dflzhub.index.get_loc(dt)
+            for dt, price in dflzhub.iteritems():
+                pred_hour_index = dflzhub.index.get_loc(dt)
                 if pred_hour_index - 7*24 >= 0:
-                    self.features.append([work_day_or_holiday(string_to_date(dt)),\
-                                          string_to_date(dt).hour,\
-                                          string_to_date(dt).weekday()]\
-                                          + self.dflzhub.iloc[pred_hour_index - 2*24:pred_hour_index - 1*24].tolist()\
-                                          + self.dflzhub.iloc[pred_hour_index - 7*24:pred_hour_index - 6*24].tolist())
-            self.feature_labels = ['Holiday', 'Hour', 'Day']\
-                                  + [('P(h-%s)' % str(i+1)) for i in range(24,48)][::-1]\
-                                  + [('P(h-%s)' % str(i+1)) for i in range(144,168)][::-1]
+                    features.append([work_day_or_holiday(string_to_date(dt)),
+                                          string_to_date(dt).hour,
+                                          string_to_date(dt).weekday()]
+                                          + dflzhub.iloc[pred_hour_index - 2*24:pred_hour_index - 1*24].tolist()
+                                          + dflzhub.iloc[pred_hour_index - 7*24:pred_hour_index - 6*24].tolist())
+            feature_labels = ['Holiday', 'Hour', 'Day']\
+                             + [('P(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
+                             + [('P(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]
             numerical_features = ['Hour']\
-                                 + [('P(h-%s)' % str(i+1)) for i in range(24,48)][::-1]\
-                                 + [('P(h-%s)' % str(i+1)) for i in range(144,168)][::-1]
-            self.idx_wout_1st_week = list(self.dflzhub.index.values)[7*24:]
-            self.features_df = pd.DataFrame(data = self.features, \
-                                            index = self.idx_wout_1st_week, \
-                                            columns = self.feature_labels)
-            min_max_scale(self.features_df, numerical_features)
-            self.features_df = encode_onehot(self.features_df, 'Day')
+                                 + [('P(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
+                                 + [('P(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]
+            idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
+            features_df = pd.DataFrame(data=features,
+                                       index=idx_wout_1st_week,
+                                       columns=feature_labels)
+            min_max_scale(features_df, numerical_features)
+            features_df = encode_onehot(features_df, 'Day')
             #normalize numerical values
 
-            return self.features_df.join(self.dflzhub,how='left')
+            return features_df.join(dflzhub, how='left')
     
    
-    
+    '''
+    Plots the prices for all load zones and hubs for the specified date range
+    '''
     def plot(self):
-        #plot the data for a date range
-        for bus_name,price in self.spp_dict.iteritems():
-            if bus_name != "date_time":
-                plt.plot(self.dts,price,label="%s" % bus_name)
-        plt.title("SPP by LZ and HUB for %s" % start_date.split("-")[0])
+        self.df.plot()
+        plt.title("SPP by LZ and HUB for %s" % self.start_date.split("-")[0])
         plt.xlabel("Date-Time")
         plt.ylabel("SPP")
         plt.legend()
@@ -103,38 +143,44 @@ class Query_DAM_by_SP(Query_ERCOT_DB):
     def get_settlement_points(self):
         return self.settlement_points
 
-def train_test_validate(ft):
+'''
+Splits the feature data frame into train, test, and validation sets
+Performs seasonal sampling; splits the date range into months and then samples within each month without replacement
+    60% of each month for training
+    20% of each month for validation
+    20% of each month for testing
+'''
+def train_test_validate(ft, train_size=0.6, val_size=0.2, test_size=0.2):
     feature_target = ft.as_matrix()
     num_features = feature_target.shape[1]
-    # split data into 24 hr samples and split into train, test, and validation sets
-    samples = [feature_target[i*24:(i*24+24),:] for i in range(356)]
-    np.random.seed(22943)
-    indices = [i for i in range(356)]
-    set_indices = set(indices)
-    train_indices = np.random.choice(indices,int(356*0.5),replace=False)
-    set_after_train_sample = set_indices.difference(set(train_indices))
-    indices_after_train = list(set_after_train_sample)
-    validate_indices = np.random.choice(indices_after_train,int(356*0.25),replace=False)
-    test_indices = list(set_after_train_sample.difference(set(validate_indices)))
-    train_list = [samples[i] for i in train_indices]
-    validate_list = [samples[i] for i in validate_indices]
-    test_list = [samples[i] for i in test_indices]
-    train = train_list[0]
-    validate = validate_list[0]
-    test = test_list[0]
-    for s in train_list[1:]:
-        train = np.concatenate((train,s),axis=0)
-    for s in validate_list[1:]:
-        validate = np.concatenate((validate,s),axis=0)
-    for s in test_list[1:]:
-        test = np.concatenate((test,s),axis=0)
-    train = (train[:,:num_features-1],train[:,num_features-1])
-    validate = (validate[:,:num_features-1],validate[:,num_features-1])
-    test = (test[:,:num_features-1],test[:,num_features-1])
-    return (train,validate,test)
+
+    train_indices = []
+    test_indices = []
+    val_indices = []
+    for i in range(MONTHS_PER_YEAR):
+        train_i, test_i, val_i = sample_month(i, train_size, val_size, test_size)
+        train_indices = train_indices + train_i
+        test_indices =  test_indices + test_i
+        val_indices = val_indices + val_i
+    train_indices = [i*HRS_PER_DAY for i in train_indices]
+    test_indices = [i*HRS_PER_DAY for i in test_indices]
+    val_indices = [i*HRS_PER_DAY for i in val_indices]
+    train_set = np.zeros((1, num_features))
+    test_set = np.zeros((1, num_features))
+    val_set = np.zeros((1, num_features))
+    for i in train_indices:
+        train_set = np.concatenate((train_set, feature_target[i:i+HRS_PER_DAY, :]), axis=0)
+    for i in test_indices:
+        test_set = np.concatenate((test_set, feature_target[i:i+HRS_PER_DAY, :]), axis=0)
+    for i in test_indices:
+        val_set = np.concatenate((val_set, feature_target[i:i+HRS_PER_DAY, :]), axis=0)
+    train_set = (train_set[1:, 0:num_features-1], train_set[1:, num_features-1])
+    val_set = (val_set[1:, 0:num_features-1], val_set[1:, num_features-1])
+    test_set = (test_set[1:, 0:num_features-1], test_set[1:, num_features-1])
+    return train_set, val_set, test_set
 
 def string_to_date(string_date):
-    return datetime.strptime(string_date,"%Y-%m-%d %H")
+    return datetime.strptime(string_date, "%Y-%m-%d %H")
 
 def date_to_string(date):
     return date.strftime("%Y-%m-%d %H")
@@ -151,22 +197,38 @@ def work_day_or_holiday(date):
 def encode_onehot(df, cols):
     enc = preprocessing.OneHotEncoder()
     index = df[cols].index
-    data = enc.fit_transform(df[cols].reshape(-1,1)).toarray()
-    one_hot_df = pd.DataFrame(data = data, index = index, columns = [cols + '%s' % i for i in range(data.shape[1])])
+    data = enc.fit_transform(df[cols].reshape(-1, 1)).toarray()
+    one_hot_df = pd.DataFrame(data=data, index=index, columns=[cols + '%s' % i for i in range(data.shape[1])])
     del df[cols]
-    return df.join(one_hot_df,how='inner')
+    return df.join(one_hot_df, how='inner')
 
 def min_max_scale(df,cols):
     min_max_scaler = preprocessing.MinMaxScaler()
     df[cols] = min_max_scaler.fit_transform(df[cols])
 
-# qdsp = Query_DAM_by_SP()
-# qdsp.query("2012-01-01","2012-12-31")
-#qdsp.plot()
-#feature_targets = qdsp.construct_feature_vector_matrix("HB_BUSAVG","A")
+def sample_month(month_index, train_size,test_size,val_size):
+    np.random.seed(22943)
+    indices = np.arange(0, DAYS_PER_MONTH)
+    set_indices = set(indices)
+    train_indices = np.random.choice(indices,
+                                  int(DAYS_PER_MONTH*train_size),
+                                  replace=False).tolist()
+    test_indices = np.random.choice(list(set_indices.difference(set(train_indices))),
+                                 int(DAYS_PER_MONTH*test_size),
+                                 replace=False).tolist()
+    val_indices = list(set_indices.difference(set(train_indices)).difference(test_indices))
+
+    train_indices = [i + month_index*DAYS_PER_MONTH for i in train_indices]
+    test_indices = [i + month_index*DAYS_PER_MONTH for i in test_indices]
+    val_indices = [i + month_index*DAYS_PER_MONTH for i in val_indices]
+    return train_indices, test_indices, val_indices
+
+def test_Query_DAM_by_SP():
+    qdsp = Query_DAM_by_SP()
+    qdsp.query("2012-01-01", "2012-12-31")
+    qdsp.plot()
+    train_test_validate(qdsp.construct_feature_vector_matrix("HB_BUSAVG", "A"))
 
 
-
-#train, val, test = train_test_validate(feature_targets)
-#train[0]
-
+if __name__ == '__main__':
+    test_Query_DAM_by_SP()
