@@ -84,21 +84,7 @@ class Query_DAM_by_SP(Query_ERCOT_DB):
         Input3: Holiday indicator
         Input4: Hourly price of day d-1
         Input5: Hourly price of day d-7
-    Model B (more historical price data):
-        Input 1: Day type indicator, i.e. ‘‘1” for Sunday, ‘‘2” for Monday
-        Input 2: Hour indicator, i.e. ‘‘1”, ‘‘2”, . . ., ‘‘24”.
-        Input 3: Holiday indicator, i.e. ‘‘1” for holidays and ‘‘0” for working days and weekends.
-        Input 4: Price of hour h-24.
-        Input 5: Price of hour h-25.
-        Input 6: Price of hour h-47.
-        Input 7: Price of hour h-48.
-        Input 8: Price of hour h-72.
-        Input 9: Price of hour h-96.
-        Input 10: Price of hour h-120.
-        Input 11: Price of hour h-144.
-        Input 12: Price of hour h-167.
-        Input 13: Price of hour h-168.
-    Model C (exogenous variables):
+    Model B (exogenous variables):
     '''
     def construct_feature_vector_matrix(self, lzhub, model_type):
         dflzhub = self.df[lzhub]
@@ -127,6 +113,8 @@ class Query_DAM_by_SP(Query_ERCOT_DB):
             #normalize numerical values
 
             return features_df.join(dflzhub, how='left')
+
+
     
    
     '''

@@ -499,16 +499,16 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000, batc
     )
 
     val_errors = []
-    training_epochs = numpy.arange(2000, 4500, 500)
+    training_epochs = numpy.arange(2000, 4500, 250)
     for epoch in range(4000):
         cost = train_model()
         if epoch in training_epochs:
-            val_errors.append(validate_model())
-    min_val_error = val_errors.index(min(val_errors))
-    optimal_epoch = training_epochs[val_errors.index(min(val_errors))]
-    print('minimum MAPE on val_set for %d epochs: %f' % (2000, min_val_error))
-    print(val_errors)
+            val_errors.append(float(validate_model()))
+    min_val_idx = val_errors.index(min(val_errors))
+    optimal_epoch = training_epochs[min_val_idx]
+    print('minimum MAPE on val_set for %d epochs: %f' % (optimal_epoch, min(val_errors)))
     test_error = test_model()
+    print('MAPE on test_set for optimal epochs: %f' % test_error)
 
     mlp_pred = mlp_prediction()
     i = numpy.arange(mlp_pred.shape[0])

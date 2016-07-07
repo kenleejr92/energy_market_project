@@ -18,7 +18,7 @@
     <SUITE FILE_PATH="coverage/scripts$OutputLayer.coverage" NAME="OutputLayer Coverage Results" MODIFIED="1467310823642" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/ML_scripts" />
     <SUITE FILE_PATH="coverage/scripts$DAM_prices_by_SP.coverage" NAME="DAM_prices_by_SP Coverage Results" MODIFIED="1467922955374" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/MySQL_scripts" />
     <SUITE FILE_PATH="coverage/scripts$LMP_table_transformation.coverage" NAME="LMP_table_transformation Coverage Results" MODIFIED="1466191164400" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/scripts$MultiLayerPerceptron.coverage" NAME="MultiLayerPerceptron Coverage Results" MODIFIED="1467925284522" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/ML_scripts" />
+    <SUITE FILE_PATH="coverage/scripts$MultiLayerPerceptron.coverage" NAME="MultiLayerPerceptron Coverage Results" MODIFIED="1467925786394" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/ML_scripts" />
   </component>
   <component name="CreatePatchCommitExecutor">
     <option name="PATCH_PATH" value="" />
@@ -29,11 +29,11 @@
   </component>
   <component name="FileEditorManager">
     <leaf>
-      <file leaf-file-name="MultiLayerPerceptron.py" pinned="false" current-in-tab="true">
+      <file leaf-file-name="MultiLayerPerceptron.py" pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/ML_scripts/MultiLayerPerceptron.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.7722096">
-              <caret line="509" column="20" selection-start-line="509" selection-start-column="20" selection-end-line="509" selection-end-column="20" />
+            <state vertical-scroll-proportion="0.0">
+              <caret line="508" column="89" selection-start-line="508" selection-start-column="89" selection-end-line="508" selection-end-column="89" />
               <folding>
                 <element signature="e#2929#5606#0" expanded="false" />
                 <element signature="e#5631#8496#0" expanded="false" />
@@ -43,19 +43,17 @@
           </provider>
         </entry>
       </file>
-      <file leaf-file-name="DAM_prices_by_SP.py" pinned="false" current-in-tab="false">
+      <file leaf-file-name="DAM_prices_by_SP.py" pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/MySQL_scripts/DAM_prices_by_SP.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state vertical-scroll-proportion="0.0">
-              <caret line="180" column="0" selection-start-line="180" selection-start-column="0" selection-end-line="180" selection-end-column="0" />
+            <state vertical-scroll-proportion="1.7084283">
+              <caret line="86" column="11" selection-start-line="86" selection-start-column="11" selection-end-line="86" selection-end-column="11" />
               <folding>
                 <element signature="e#17#27#0" expanded="true" />
-                <element signature="e#1596#2767#0" expanded="false" />
-                <element signature="e#3840#5436#0" expanded="false" />
-                <element signature="e#5568#5758#0" expanded="false" />
-                <element signature="e#5805#5834#0" expanded="false" />
-                <marker date="1467923134150" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
-                <marker date="1467923134150" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
+                <element signature="e#4912#5102#0" expanded="false" />
+                <element signature="e#5149#5178#0" expanded="false" />
+                <marker date="1467927704726" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
+                <marker date="1467927704726" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
               </folding>
             </state>
           </provider>
@@ -84,8 +82,8 @@
         <option value="$PROJECT_DIR$/ML_scripts/MultiLayerPerceptron.ipynb" />
         <option value="$PROJECT_DIR$/MySQL_scripts/Query_ERCOT_DB.py" />
         <option value="$PROJECT_DIR$/ML_scripts/OutputLayer.py" />
-        <option value="$PROJECT_DIR$/MySQL_scripts/DAM_prices_by_SP.py" />
         <option value="$PROJECT_DIR$/ML_scripts/MultiLayerPerceptron.py" />
+        <option value="$PROJECT_DIR$/MySQL_scripts/DAM_prices_by_SP.py" />
       </list>
     </option>
   </component>
@@ -578,12 +576,10 @@
           <caret line="83" column="12" selection-start-line="83" selection-start-column="12" selection-end-line="83" selection-end-column="12" />
           <folding>
             <element signature="e#17#27#0" expanded="true" />
-            <element signature="e#1596#2767#0" expanded="false" />
-            <element signature="e#3840#5436#0" expanded="false" />
-            <element signature="e#5568#5758#0" expanded="false" />
-            <element signature="e#5805#5834#0" expanded="false" />
-            <marker date="1467923134150" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
-            <marker date="1467923134150" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
+            <element signature="e#4912#5102#0" expanded="false" />
+            <element signature="e#5149#5178#0" expanded="false" />
+            <marker date="1467927704726" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
+            <marker date="1467927704726" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
           </folding>
         </state>
       </provider>
@@ -618,12 +614,10 @@
           <caret line="83" column="12" selection-start-line="83" selection-start-column="12" selection-end-line="83" selection-end-column="12" />
           <folding>
             <element signature="e#17#27#0" expanded="true" />
-            <element signature="e#1596#2767#0" expanded="false" />
-            <element signature="e#3840#5436#0" expanded="false" />
-            <element signature="e#5568#5758#0" expanded="false" />
-            <element signature="e#5805#5834#0" expanded="false" />
-            <marker date="1467923134150" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
-            <marker date="1467923134150" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
+            <element signature="e#4912#5102#0" expanded="false" />
+            <element signature="e#5149#5178#0" expanded="false" />
+            <marker date="1467927704726" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
+            <marker date="1467927704726" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
           </folding>
         </state>
       </provider>
@@ -658,12 +652,10 @@
           <caret line="83" column="12" selection-start-line="83" selection-start-column="12" selection-end-line="83" selection-end-column="12" />
           <folding>
             <element signature="e#17#27#0" expanded="true" />
-            <element signature="e#1596#2767#0" expanded="false" />
-            <element signature="e#3840#5436#0" expanded="false" />
-            <element signature="e#5568#5758#0" expanded="false" />
-            <element signature="e#5805#5834#0" expanded="false" />
-            <marker date="1467923134150" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
-            <marker date="1467923134150" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
+            <element signature="e#4912#5102#0" expanded="false" />
+            <element signature="e#5149#5178#0" expanded="false" />
+            <marker date="1467927704726" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
+            <marker date="1467927704726" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
           </folding>
         </state>
       </provider>
@@ -686,12 +678,10 @@
           <caret line="144" column="0" selection-start-line="144" selection-start-column="0" selection-end-line="144" selection-end-column="0" />
           <folding>
             <element signature="e#17#27#0" expanded="true" />
-            <element signature="e#1596#2767#0" expanded="false" />
-            <element signature="e#3840#5436#0" expanded="false" />
-            <element signature="e#5568#5758#0" expanded="false" />
-            <element signature="e#5805#5834#0" expanded="false" />
-            <marker date="1467923134150" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
-            <marker date="1467923134150" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
+            <element signature="e#4912#5102#0" expanded="false" />
+            <element signature="e#5149#5178#0" expanded="false" />
+            <marker date="1467927704726" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
+            <marker date="1467927704726" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
           </folding>
         </state>
       </provider>
@@ -758,30 +748,28 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/MySQL_scripts/DAM_prices_by_SP.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.0">
-          <caret line="180" column="0" selection-start-line="180" selection-start-column="0" selection-end-line="180" selection-end-column="0" />
-          <folding>
-            <element signature="e#17#27#0" expanded="true" />
-            <element signature="e#1596#2767#0" expanded="false" />
-            <element signature="e#3840#5436#0" expanded="false" />
-            <element signature="e#5568#5758#0" expanded="false" />
-            <element signature="e#5805#5834#0" expanded="false" />
-            <marker date="1467923134150" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
-            <marker date="1467923134150" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
-          </folding>
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/ML_scripts/MultiLayerPerceptron.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state vertical-scroll-proportion="0.7722096">
-          <caret line="509" column="20" selection-start-line="509" selection-start-column="20" selection-end-line="509" selection-end-column="20" />
+        <state vertical-scroll-proportion="0.0">
+          <caret line="508" column="89" selection-start-line="508" selection-start-column="89" selection-end-line="508" selection-end-column="89" />
           <folding>
             <element signature="e#2929#5606#0" expanded="false" />
             <element signature="e#5631#8496#0" expanded="false" />
             <element signature="e#10458#13088#0" expanded="false" />
+          </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/MySQL_scripts/DAM_prices_by_SP.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state vertical-scroll-proportion="1.7084283">
+          <caret line="86" column="11" selection-start-line="86" selection-start-column="11" selection-end-line="86" selection-end-column="11" />
+          <folding>
+            <element signature="e#17#27#0" expanded="true" />
+            <element signature="e#4912#5102#0" expanded="false" />
+            <element signature="e#5149#5178#0" expanded="false" />
+            <marker date="1467927704726" expanded="true" signature="1017:1072" placeholder="SELECT DISTI..DAM_prices_by_SPP..." />
+            <marker date="1467927704726" expanded="true" signature="1770:2029" placeholder="SELECT deliv..DAM_prices_by_SPP..." />
           </folding>
         </state>
       </provider>
