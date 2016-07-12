@@ -23,7 +23,12 @@ HRS_PER_DAY = 24
 class Query_DAM_by_SP(Query_ERCOT_DB):
     # list of settlement points is common across all instances of the DAM_by_SP class
     settlement_points = []
-
+    Query_ERCOT_DB.c.execute("""SELECT DISTINCT settlement_point FROM DAM_prices_by_SPP""")
+    r = list(Query_ERCOT_DB.c.fetchall())
+    for settlement_point in r:
+        if settlement_point[0] == "\"Settlement Point\"":
+            continue
+        settlement_points.append(settlement_point[0])
     '''
     Query the list of settlement points and remove the heading "Settlement Point"
     self.start_date - start date of query
@@ -32,12 +37,6 @@ class Query_DAM_by_SP(Query_ERCOT_DB):
     self.df - pandas data frame representing the query result
     '''
     def __init__(self):
-        Query_ERCOT_DB.c.execute("""SELECT DISTINCT settlement_point FROM DAM_prices_by_SPP""")
-        r = list(Query_ERCOT_DB.c.fetchall())
-        for settlement_point in r:
-            if settlement_point[0] == "\"Settlement Point\"":
-                continue
-            self.settlement_points.append(settlement_point[0])
         self.start_date = None
         self.end_date = None
         self.dts = None
@@ -160,7 +159,7 @@ def train_test_validate(ft, train_size=0.6, val_size=0.2, test_size=0.2):
         train_set = np.concatenate((train_set, feature_target[i:i+HRS_PER_DAY, :]), axis=0)
     for i in test_indices:
         test_set = np.concatenate((test_set, feature_target[i:i+HRS_PER_DAY, :]), axis=0)
-    for i in test_indices:
+    for i in val_indices:
         val_set = np.concatenate((val_set, feature_target[i:i+HRS_PER_DAY, :]), axis=0)
     train_set = (train_set[1:, 0:num_features-1], train_set[1:, num_features-1])
     val_set = (val_set[1:, 0:num_features-1], val_set[1:, num_features-1])
@@ -195,7 +194,7 @@ def min_max_scale(df,cols):
     df[cols] = min_max_scaler.fit_transform(df[cols])
 
 def sample_month(month_index, train_size,test_size,val_size):
-    np.random.seed(22943)
+    np.random.seed(1111)
     indices = np.arange(0, DAYS_PER_MONTH)
     set_indices = set(indices)
     train_indices = np.random.choice(indices,

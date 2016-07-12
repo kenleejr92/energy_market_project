@@ -9,10 +9,7 @@ import sys
 import numpy
 import theano
 import theano.tensor as T
-import matplotlib.pyplot as plt
 sys.path.insert(0, '/home/kenlee/energy_market_project/scripts/MySQL_scripts/')
-from DAM_prices_by_SP import Query_DAM_by_SP
-from DAM_prices_by_SP import train_test_validate
 
 class OutputLayer(object):
     """
@@ -86,7 +83,10 @@ class OutputLayer(object):
         if y.dtype.startswith('float'):
             # the T.neq operator returns a vector of 0s and 1s, where 1
             # represents a mistake in prediction
-            return T.mean(abs((y-self.y_pred.T)/y))
+            MAE = T.mean(abs(y-self.y_pred.T))
+            MAPE = T.mean(abs((y-self.y_pred.T)/y))*100
+            TheilU1 = T.sqrt(T.mean((y-self.y_pred.T)**2))/(T.sqrt(T.mean(y**2))+T.sqrt(T.mean(self.y_pred**2)))
+            return MAE, MAPE, TheilU1
         else:
             raise NotImplementedError()
 
@@ -245,51 +245,6 @@ class MLP(object):
         # keep track of model input
         self.input = input
 
-def load_data():
-
-    #############
-    # LOAD DATA #
-    #############
-
-
-    # Load the dataset
-    qdsp = Query_DAM_by_SP()
-    qdsp.query("2015-01-01", "2015-12-31")
-    feature_targets = qdsp.construct_feature_vector_matrix("HB_BUSAVG", "A")
-    train_set, val_set, test_set = train_test_validate(feature_targets)
-    # train_set, valid_set, test_set format: tuple(input, target)
-    # input is a numpy.ndarray of 2 dimensions (a matrix)
-    # where each row corresponds to an example. target is a
-    # numpy.ndarray of 2 dimensions that has the same
-    # the number of rows in the input. It should give the target
-    # to the example with the same index in the input.
-
-    def shared_dataset(data_xy, borrow=True):
-        """ Function that loads the dataset into shared variables
-
-        The reason we store our dataset in shared variables is to allow
-        Theano to copy it into the GPU memory (when code is run on GPU).
-        Since copying data into the GPU is slow, copying a minibatch everytime
-        is needed (the default behaviour if the data is not in a shared
-        variable) would lead to a large decrease in performance.
-        """
-        data_x, data_y = data_xy
-        shared_x = theano.shared(numpy.asmatrix(data_x,
-                                               dtype=theano.config.floatX),
-                                 borrow=borrow)
-        shared_y = theano.shared(numpy.asmatrix(data_y,
-                                               dtype=theano.config.floatX),
-                                 borrow=borrow)
-        # When storing data on the GPU it has to be stored as floats
-        return shared_x, shared_y
-
-    test_set_x, test_set_y = shared_dataset(test_set)
-    valid_set_x, valid_set_y = shared_dataset(val_set)
-    train_set_x, train_set_y = shared_dataset(train_set)
-
-    rval = [(train_set_x, train_set_y), (valid_set_x, valid_set_y),(test_set_x, test_set_y)]
-    return rval
-
 def test_linreg():
     # Testing Linear Regression
     datasets = load_data()
@@ -380,149 +335,7 @@ def test_linreg():
     print(linreg.W.eval())
     print(linreg.b.eval())
 
-def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000, batch_size=500, n_hidden=30):
-    """
 
-    :type learning_rate: float
-    :param learning_rate: learning rate used (factor for the stochastic
-    gradient
-
-    :type L1_reg: float
-    :param L1_reg: L1-norm's weight when added to the cost (see
-    regularization)
-
-    :type L2_reg: float
-    :param L2_reg: L2-norm's weight when added to the cost (see
-    regularization)
-
-    :type n_epochs: int
-    :param n_epochs: maximal number of epochs to run the optimizer
-
-    :type dataset: string
-    :param dataset: the path of the MNIST dataset file from
-                 http://www.iro.umontreal.ca/~lisa/deep/data/mnist/mnist.pkl.gz
-
-
-   """
-    datasets = load_data()
-
-    train_set_x, train_set_y = datasets[0]
-    valid_set_x, valid_set_y = datasets[1]
-    test_set_x, test_set_y = datasets[2]
-
-    ######################
-    # BUILD ACTUAL MODEL #
-    ######################
-    print('... building the model')
-
-    # allocate symbolic variables for the data
-    index = T.lscalar()  # index to a [mini]batch
-    x = T.fmatrix('x')  # the data is presented as rasterized images
-    y = T.fmatrix('y') #  the labels are presented as 1D vector of
-                        # [int] labels
-
-    rng = numpy.random.RandomState(1234)
-
-    # construct the MLP class
-    predictor = MLP(
-        rng=rng,
-        input=x,
-        n_in=57,
-        n_hidden=n_hidden,
-        n_out=1
-    )
-
-    # start-snippet-4
-    # the cost we minimize during training is the negative log likelihood of
-    # the model plus the regularization terms (L1 and L2); cost is expressed
-    # here symbolically
-    cost = (predictor.cost_function(y) + L1_reg * predictor.L1 + L2_reg * predictor.L2_sqr)
-
-    # end-snippet-4
-
-    # compiling a Theano function that computes the mistakes that are made
-    # by the model on a minibatch
-    test_model = theano.function(
-        inputs=[],
-        outputs=predictor.errors(y),
-        givens={
-            x: test_set_x,
-            y: test_set_y
-        }
-    )
-
-    validate_model = theano.function(
-        inputs=[],
-        outputs=predictor.errors(y),
-        givens={
-            x: valid_set_x,
-            y: valid_set_y
-        }
-    )
-
-    # start-snippet-5
-    # compute the gradient of cost with respect to theta (sorted in params)
-    # the resulting gradients will be stored in a list gparams
-    gparams = [T.grad(cost, param) for param in predictor.params]
-
-    # specify how to update the parameters of the model as a list of
-    # (variable, update expression) pairs
-
-    # given two lists of the same length, A = [a1, a2, a3, a4] and
-    # B = [b1, b2, b3, b4], zip generates a list C of same size, where each
-    # element is a pair formed from the two lists :
-    #    C = [(a1, b1), (a2, b2), (a3, b3), (a4, b4)]
-    updates = [
-        (param, param - learning_rate * gparam)
-        for param, gparam in zip(predictor.params, gparams)
-    ]
-
-    # compiling a Theano function `train_model` that returns the cost, but
-    # in the same time updates the parameter of the model based on the rules
-    # defined in `updates`
-    train_model = theano.function(
-        inputs=[],
-        outputs=cost,
-        updates=updates,
-        givens={
-            x: train_set_x,
-            y: train_set_y
-        }
-    )
-
-    mlp_prediction = theano.function(
-        inputs=[],
-        outputs=predictor.outputLayer.y_pred,
-        givens = {
-            x: test_set_x,
-        }
-    )
-
-    val_errors = []
-    training_epochs = numpy.arange(2000, 4500, 250)
-    for epoch in range(4000):
-        cost = train_model()
-        if epoch in training_epochs:
-            val_errors.append(float(validate_model()))
-    min_val_idx = val_errors.index(min(val_errors))
-    optimal_epoch = training_epochs[min_val_idx]
-    print('minimum MAPE on val_set for %d epochs: %f' % (optimal_epoch, min(val_errors)))
-    test_error = test_model()
-    print('MAPE on test_set for optimal epochs: %f' % test_error)
-
-    mlp_pred = mlp_prediction()
-    i = numpy.arange(mlp_pred.shape[0])
-    plt.plot(i, test_set_y.T.eval(), label='Actual Price')
-    plt.plot(i, mlp_pred, label='Predicted Price')
-    plt.xlabel('Hour')
-    plt.ylabel('Price')
-    plt.legend()
-    plt.show()
-
-
-
-if __name__ == '__main__':
-    test_mlp()
 
 
 
