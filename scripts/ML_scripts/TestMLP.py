@@ -7,7 +7,7 @@ import numpy
 import theano
 import theano.tensor as T
 from MultiLayerPerceptron import MLP
-from DAM_prices_by_SP import Query_DAM_by_SP
+from DAM_prices_by_SP import Feature_Processor
 from DAM_prices_by_SP import train_test_validate
 
 def load_data(start_date, end_date, zone, model):
@@ -18,7 +18,7 @@ def load_data(start_date, end_date, zone, model):
 
 
     # Load the dataset
-    qdsp = Query_DAM_by_SP()
+    qdsp = Feature_Processor()
     qdsp.query(start_date, end_date)
     feature_targets = qdsp.construct_feature_vector_matrix(zone, model)
     train_set, val_set, test_set = train_test_validate(feature_targets)
@@ -220,7 +220,7 @@ DATES = [('2011-01-01', '2011-12-31'),
 LOAD_ZONES = ['LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST', 'LZ_HOUSTON']
 
 if __name__ == '__main__':
-    model = 'A'
+    model = 'B'
     os.chdir('../test_results')
     f = open('MLP_Model%s_results.csv' % model, 'w+')
     f.write('zone,year,MAE,MAPE,TheilU1,epochs\n')

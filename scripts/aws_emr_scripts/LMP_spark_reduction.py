@@ -6,7 +6,7 @@ sc = SparkContext(conf = conf)
 
 
 #Load LMP data
-raw_LMP = sc.textFile("/home/kenlee/energy_market_project/LMP_data/DAM_Hr_LMP_2010/merge_test.csv")
+raw_LMP = sc.textFile("/ssd/raw_ercot_data/dam_lmps/DAM_by_LZHBSPP/2010-2016_DAM_by_SPP.csv")
 
 #remove csv header
 header = raw_LMP.first()
@@ -15,7 +15,7 @@ raw_LMP = raw_LMP.filter(lambda x: x!=header)
 #create (datetime, (bus_name,price)) pair
 def create_pairs(line):
     temp = line.split(",")
-    return (temp[0] + " " +  temp[1], [(temp[2],temp[3])])
+    return (temp[0] + "," +  temp[1], [(temp[3],temp[4])])
 pairs = raw_LMP.map(create_pairs)
 
 #reduce by datetime key
@@ -29,7 +29,8 @@ first_date = sorted_by_bus_name.take(1)
 bus_names = []
 for bus_price in first_date[0][1]:
     bus_names.append(bus_price[0])
-#....save bus_names to file
+bus_names_rdd = sc.parallelize(bus_names).coalesce(1)
+bus_names_rdd.saveAsTextFile("/ssd/raw_ercot_data/dam_lmps/DAM_by_LZHBSPP/zones")
 
 #delete bus_name
 no_bus_names = sorted_by_bus_name.mapValues(lambda x: [i[1] for i in x])
@@ -41,7 +42,7 @@ def remove_kv(key_value):
          date_time = date_time + "," + price
     return date_time
 unrolled = no_bus_names.map(remove_kv) 
-unrolled.saveAsTextFile("/home/kenlee/energy_market_project/LMP_data/DAM_Hr_LMP_2010/formatted_merge_test");
+unrolled.saveAsTextFile("/ssd/raw_ercot_data/dam_lmps/DAM_by_LZHBSPP/spark_results")
 
 
 
