@@ -10,7 +10,7 @@ from MultiLayerPerceptron import MLP
 from DAM_prices_by_SP import Feature_Processor
 from DAM_prices_by_SP import train_test_validate
 
-def load_data(start_date, end_date, zone, model):
+def load_data(fp, start_date, end_date, zone, model):
 
     #############
     # LOAD DATA #
@@ -18,9 +18,8 @@ def load_data(start_date, end_date, zone, model):
 
 
     # Load the dataset
-    qdsp = Feature_Processor()
-    qdsp.query(start_date, end_date)
-    feature_targets = qdsp.construct_feature_vector_matrix(zone, model)
+    fp.query(start_date, end_date)
+    feature_targets = fp.construct_feature_vector_matrix(zone, model)
     train_set, val_set, test_set = train_test_validate(feature_targets)
     # train_set, valid_set, test_set format: tuple(input, target)
     # input is a numpy.ndarray of 2 dimensions (a matrix)
@@ -55,7 +54,8 @@ def load_data(start_date, end_date, zone, model):
     rval = [(train_set_x, train_set_y), (valid_set_x, valid_set_y),(test_set_x, test_set_y)]
     return rval
 
-def test_mlp(f,
+def test_mlp(fp,
+             f,
              start_date,
              end_date,
              zone,
@@ -87,7 +87,7 @@ def test_mlp(f,
 
 
    """
-    datasets = load_data(start_date, end_date, zone, model)
+    datasets = load_data(fp, start_date, end_date, zone, model)
 
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
@@ -164,7 +164,7 @@ def test_mlp(f,
     # defined in `updates`
     train_model = theano.function(
         inputs=[],
-        outputs=cost,
+        outputs=predictor.hiddenLayer.W,
         updates=updates,
         givens={
             x: train_set_x,
@@ -180,11 +180,12 @@ def test_mlp(f,
         }
     )
 
+
     val_errors = []
     test_errors = []
-    training_epochs = numpy.arange(2000, 4500, 250)
-    for epoch in range(4000):
-        cost = train_model()
+    training_epochs = numpy.arange(100, 1000, 50)
+    for epoch in range(1000):
+        hl_W = train_model()
         if epoch in training_epochs:
             MAE_val, MAPE_val, TheilU1_val = validate_model()
             val_errors.append((float(MAE_val), float(MAPE_val), float(TheilU1_val)))
@@ -200,10 +201,10 @@ def test_mlp(f,
                                  test_errors[min_val_idx][2],
                                  optimal_epoch))
 
-    # print('Minimum MAPE on val_set for %d optimal epochs: %f' % (optimal_epoch, min(val_metric)))
-    # print('MAE on test_set: %f' % test_errors[min_val_idx][0])
-    # print('MAPE on test_set: %f' % test_errors[min_val_idx][1])
-    # print('TheilU1 on test_set: %f' % test_errors[min_val_idx][2])
+    print('Minimum MAPE on val_set for %d optimal epochs: %f' % (optimal_epoch, min(val_metric)))
+    print('MAE on test_set: %f' % test_errors[min_val_idx][0])
+    print('MAPE on test_set: %f' % test_errors[min_val_idx][1])
+    print('TheilU1 on test_set: %f' % test_errors[min_val_idx][2])
     # mlp_pred = mlp_prediction()
     # i = numpy.arange(mlp_pred.shape[0])
     # plt.plot(i, test_set_y.T.eval(), label='Actual Price')
@@ -221,11 +222,12 @@ LOAD_ZONES = ['LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST', 'LZ_HOUSTON']
 
 if __name__ == '__main__':
     model = 'B'
+    fp = Feature_Processor()
     os.chdir('../test_results')
     f = open('MLP_Model%s_results.csv' % model, 'w+')
     f.write('zone,year,MAE,MAPE,TheilU1,epochs\n')
     for sd, ed in DATES:
         for sp in LOAD_ZONES:
-            test_mlp(f, sd, ed, sp, model)
+            test_mlp(fp, f, sd, ed, sp, model)
         print('Finished year %s' % sd[:4])
     f.close()

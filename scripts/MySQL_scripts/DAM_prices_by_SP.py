@@ -47,7 +47,8 @@ class Feature_Processor(Query_ERCOT_DB):
         self.end_date = None
         self.dts = None
         self.df = None
-    
+        self.features_df = None
+
     '''
     Query for all prices for all load zones and hubs for specified date range
     Creates a pandas data frame of the query
@@ -95,23 +96,27 @@ class Feature_Processor(Query_ERCOT_DB):
                 if pred_hour_index - 7*24 >= 0:
                     features.append([work_day_or_holiday(dt),
                                           dt.hour,
-                                          dt.weekday()]
+                                          dt.weekday(),
+                                          dt.month]
                                           + dflzhub.iloc[pred_hour_index - 2*24:pred_hour_index - 1*24].tolist()
                                           + dflzhub.iloc[pred_hour_index - 7*24:pred_hour_index - 6*24].tolist())
-            feature_labels = ['Holiday', 'Hour', 'Day']\
+            feature_labels = ['Holiday', 'Hour', 'Day', 'Month']\
                              + [('P(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
                              + [('P(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]
-            numerical_features = ['Hour']\
-                                 + [('P(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
+            numerical_features = [('P(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
                                  + [('P(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
-            features_df = pd.DataFrame(data=features,
+            self.features_df = pd.DataFrame(data=features,
                                        index=idx_wout_1st_week,
                                        columns=feature_labels)
-            min_max_scale(features_df, numerical_features)
+            features_df = pd.DataFrame.copy(self.features_df)
+            features_df = min_max_scale(features_df, numerical_features)
+            # features_df = normalize(features_df,numerical_features)
+            # features_df = standard_scale(features_df, numerical_features)
+            # features_df = robust_scale(features_df, numerical_features)
             features_df = encode_onehot(features_df, 'Day')
-            #normalize numerical values
-
+            features_df = encode_onehot(features_df, 'Month')
+            features_df = encode_onehot(features_df, 'Hour')
             return features_df.join(dflzhub, how='left')
 
         if model_type == 'B':
@@ -120,27 +125,28 @@ class Feature_Processor(Query_ERCOT_DB):
                 if pred_hour_index - 7*24 >= 0:
                     features.append([work_day_or_holiday(dt),
                                           dt.hour,
-                                          dt.weekday()]
+                                          dt.weekday(),
+                                          dt.month,
+                                          load_df.iloc[pred_hour_index]]
                                           + dflzhub.iloc[pred_hour_index - 2*24:pred_hour_index - 1*24].tolist()
-                                          + dflzhub.iloc[pred_hour_index - 7*24:pred_hour_index - 6*24].tolist()
-                                          + load_df.iloc[pred_hour_index - 2*24:pred_hour_index - 1*24].tolist()
-                                          + load_df.iloc[pred_hour_index - 7*24:pred_hour_index - 6*24].tolist())
-            feature_labels = ['Holiday', 'Hour', 'Day']\
+                                          + dflzhub.iloc[pred_hour_index - 7*24:pred_hour_index - 6*24].tolist())
+            feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'FLoad']\
                              + [('P(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
-                             + [('P(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]\
-                             + [('L(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
-                             + [('L(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]
-            numerical_features = ['Hour']\
-                                 + [('P(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
-                                 + [('P(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]\
-                                 + [('L(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
-                                 + [('L(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]
+                             + [('P(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]
+            numerical_features = ['FLoad'] + [('P(h-%s)' % str(i+1)) for i in range(24, 48)][::-1]\
+                                 + [('P(h-%s)' % str(i+1)) for i in range(144, 168)][::-1]
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
-            features_df = pd.DataFrame(data=features,
+            self.features_df = pd.DataFrame(data=features,
                                        index=idx_wout_1st_week,
                                        columns=feature_labels)
-            min_max_scale(features_df, numerical_features)
+            features_df = pd.DataFrame.copy(self.features_df)
+            features_df = min_max_scale(features_df, numerical_features)
+            # features_df = standard_scale(features_df, numerical_features)
+            # features_df = normalize(features_df,numerical_features)
+            # features_df = robust_scale(features_df,numerical_features)
             features_df = encode_onehot(features_df, 'Day')
+            features_df = encode_onehot(features_df, 'Month')
+            features_df = encode_onehot(features_df, 'Hour')
             return features_df.join(dflzhub, how='left')
 
     
@@ -166,7 +172,7 @@ Performs seasonal sampling; splits the date range into months and then samples w
     20% of each month for validation
     20% of each month for testing
 '''
-def train_test_validate(ft, train_size=0.6, val_size=0.2, test_size=0.2):
+def train_test_validate(ft, train_size=0.6, test_size=0.2):
     feature_target = ft.as_matrix()
     num_features = feature_target.shape[1]
 
@@ -174,25 +180,33 @@ def train_test_validate(ft, train_size=0.6, val_size=0.2, test_size=0.2):
     test_indices = []
     val_indices = []
     for i in range(MONTHS_PER_YEAR):
-        train_i, test_i, val_i = sample_month(i, train_size, val_size, test_size)
+        train_i, test_i, val_i = sample_month(i, train_size, test_size)
         train_indices = train_indices + train_i
-        test_indices =  test_indices + test_i
+        test_indices = test_indices + test_i
         val_indices = val_indices + val_i
     train_indices = [i*HRS_PER_DAY for i in train_indices]
     test_indices = [i*HRS_PER_DAY for i in test_indices]
     val_indices = [i*HRS_PER_DAY for i in val_indices]
-    train_set = np.zeros((1, num_features))
-    test_set = np.zeros((1, num_features))
-    val_set = np.zeros((1, num_features))
+    train_dfs = []
+    test_dfs = []
+    val_dfs = []
     for i in train_indices:
-        train_set = np.concatenate((train_set, feature_target[i:i+HRS_PER_DAY, :]), axis=0)
+        train_dfs.append(ft.iloc[i:i+HRS_PER_DAY])
+    train_df = pd.concat(train_dfs)
     for i in test_indices:
-        test_set = np.concatenate((test_set, feature_target[i:i+HRS_PER_DAY, :]), axis=0)
+        test_dfs.append(ft.iloc[i:i+HRS_PER_DAY])
+    test_df = pd.concat(test_dfs)
     for i in val_indices:
-        val_set = np.concatenate((val_set, feature_target[i:i+HRS_PER_DAY, :]), axis=0)
-    train_set = (train_set[1:, 0:num_features-1], train_set[1:, num_features-1])
-    val_set = (val_set[1:, 0:num_features-1], val_set[1:, num_features-1])
-    test_set = (test_set[1:, 0:num_features-1], test_set[1:, num_features-1])
+        val_dfs.append(ft.iloc[i:i+HRS_PER_DAY])
+    val_df = pd.concat(val_dfs)
+    # train_df['LZ_NORTH_SPP'].plot()
+    # test_df['LZ_NORTH_SPP'].plot()
+    # val_df['LZ_NORTH_SPP'].plot()
+    # plt.legend()
+    # plt.show()
+    train_set = (train_df.ix[:, 0:num_features-1].as_matrix(), train_df.ix[:, num_features-1].as_matrix())
+    val_set = (val_df.ix[:,0:num_features-1].as_matrix(), val_df.ix[:, num_features-1].as_matrix())
+    test_set = (test_df.ix[:, 0:num_features-1].as_matrix(), test_df.ix[:, num_features-1].as_matrix())
     return train_set, val_set, test_set
 
 def string_to_date(string_date):
@@ -221,9 +235,25 @@ def encode_onehot(df, cols):
 def min_max_scale(df,cols):
     min_max_scaler = preprocessing.MinMaxScaler()
     df[cols] = min_max_scaler.fit_transform(df[cols])
+    return df
 
-def sample_month(month_index, train_size,test_size,val_size):
-    np.random.seed(1111)
+def standard_scale(df,cols):
+    scaler = preprocessing.StandardScaler()
+    df[cols] = scaler.fit_transform(df[cols])
+    return df
+
+def robust_scale(df,cols):
+    rscaler = preprocessing.RobustScaler()
+    df[cols] = rscaler.fit_transform(df[cols])
+    return df
+
+def normalize(df,cols):
+    normalizer = preprocessing.Normalizer()
+    df[cols] = normalizer.fit_transform(df[cols], norm='l2')
+    return df
+
+def sample_month(month_index, train_size, test_size):
+    np.random.seed(22943)
     indices = np.arange(0, DAYS_PER_MONTH)
     set_indices = set(indices)
     train_indices = np.random.choice(indices,
@@ -242,7 +272,9 @@ def sample_month(month_index, train_size,test_size,val_size):
 def test_Query_DAM_by_SP():
     qdsp = Feature_Processor()
     qdsp.query("2012-01-01", "2012-12-31")
-    qdsp.construct_feature_vector_matrix('LZ_NORTH', 'B')
+    fdf = qdsp.construct_feature_vector_matrix('LZ_NORTH', 'A')
+    print(qdsp.features_df)
+    train_set, val_set, test_set = train_test_validate(fdf, 0.6, 0.2)
 
 
 if __name__ == '__main__':
