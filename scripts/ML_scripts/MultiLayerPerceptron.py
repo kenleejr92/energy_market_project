@@ -65,7 +65,7 @@ class OutputLayer(object):
         return T.mean((y - self.y_pred.T)**2)
 
 
-    def errors(self, y):
+    def errors(self, y, output_norm):
         """Return a float representing mean quadratic error over the minibatch
 
         :type y: theano.tensor.TensorType
@@ -83,9 +83,9 @@ class OutputLayer(object):
         if y.dtype.startswith('float'):
             # the T.neq operator returns a vector of 0s and 1s, where 1
             # represents a mistake in prediction
-            MAE = T.mean(abs(y-self.y_pred.T))
-            MAPE = T.mean(abs((y-self.y_pred.T)/y))*100
-            TheilU1 = T.sqrt(T.mean((y-self.y_pred.T)**2))/(T.sqrt(T.mean(y**2))+T.sqrt(T.mean(self.y_pred**2)))
+            MAE = T.mean(abs(y*output_norm-self.y_pred.T*output_norm))
+            MAPE = T.mean(abs((y*output_norm-self.y_pred.T*output_norm)/(y*output_norm)))*100
+            TheilU1 = T.sqrt(T.mean((y*output_norm-self.y_pred.T*output_norm)**2))/(T.sqrt(T.mean((y*output_norm)**2))+T.sqrt(T.mean((self.y_pred*output_norm)**2)))
             return MAE, MAPE, TheilU1
         else:
             raise NotImplementedError()

@@ -126,7 +126,7 @@ def test_mlp(fp,
     # by the model on a minibatch
     test_model = theano.function(
         inputs=[],
-        outputs=predictor.errors(y),
+        outputs=predictor.errors(y, fp.output_norm),
         givens={
             x: test_set_x,
             y: test_set_y
@@ -135,7 +135,7 @@ def test_mlp(fp,
 
     validate_model = theano.function(
         inputs=[],
-        outputs=predictor.errors(y),
+        outputs=predictor.errors(y, fp.output_norm),
         givens={
             x: valid_set_x,
             y: valid_set_y
@@ -221,7 +221,7 @@ DATES = [('2011-01-01', '2011-12-31'),
 LOAD_ZONES = ['LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST', 'LZ_HOUSTON']
 
 if __name__ == '__main__':
-    model = 'B'
+    model = 'C'
     fp = Feature_Processor()
     os.chdir('../test_results')
     f = open('MLP_Model%s_results.csv' % model, 'w+')
