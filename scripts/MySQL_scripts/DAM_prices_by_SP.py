@@ -19,6 +19,7 @@ from sklearn import cross_validation
 from sklearn import datasets
 from sklearn import preprocessing
 from Query_ERCOT_DB import Query_ERCOT_DB
+from Data_Scaler import Data_Scaler
 
 MONTHS_PER_YEAR = 12
 DAYS_PER_MONTH = 30
@@ -57,7 +58,13 @@ class Feature_Processor(Query_ERCOT_DB):
         self.train_df = None
         self.val_df = None
         self.test_df = None
-        self.standard_scaler = None
+        self.data_scaler = None
+        self.numerical_features = None
+        self.lzhub = None
+        self.modelA_features = ['P(h-24)', 'P(h-168)']
+        self.modelB_features = ['P(h-24)', 'P(h-25)', 'P(h-47)', 'P(h-48)', 'P(h-72)', 'P(h-120)', 'P(h-144)', 'P(h-167)', 'P(h-168)']
+        self.modelC_features = ['FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
+        self.LSTM_features = ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)', 'P(h-110)', 'P(h-134)', 'P(h-168)']
 
 
     '''
@@ -98,6 +105,7 @@ class Feature_Processor(Query_ERCOT_DB):
     Model B (exogenous variables):
     '''
     def construct_feature_vector_matrix(self, lzhub, model_type):
+        self.lzhub = lzhub + '_SPP'
         dflzhub = self.df[lzhub + '_SPP']
         load_df = self.df[lzhub + '_load']
         features = []
@@ -105,7 +113,7 @@ class Feature_Processor(Query_ERCOT_DB):
         numerical_features = None
         idx_wout_1st_week = None
         
-        if model_type == "A":
+        if model_type == 'A':
             for dt, price in dflzhub.iteritems():
                 pred_hour_index = dflzhub.index.get_loc(dt)
                 if pred_hour_index - 7*24 >= 0:
@@ -116,6 +124,7 @@ class Feature_Processor(Query_ERCOT_DB):
                                           dflzhub.iloc[pred_hour_index - 1*24],
                                           dflzhub.iloc[pred_hour_index - 7*24]])
             feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'P(h-24)', 'P(h-168)']
+            self.numerical_features = self.modelA_features + [lzhub + '_SPP']
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
 
         if model_type == 'B':
@@ -136,6 +145,7 @@ class Feature_Processor(Query_ERCOT_DB):
                                           dflzhub.iloc[pred_hour_index - 167],
                                           dflzhub.iloc[pred_hour_index - 168]])
             feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'P(h-24)', 'P(h-25)', 'P(h-47)', 'P(h-48)', 'P(h-72)',                              'P(h-120)', 'P(h-144)', 'P(h-167)', 'P(h-168)']
+            self.numerical_features = self.modelB_features + [lzhub + '_SPP']
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
 
         if model_type == 'C':
@@ -152,12 +162,33 @@ class Feature_Processor(Query_ERCOT_DB):
                                           load_df.iloc[pred_hour_index - 1*24],
                                           load_df.iloc[pred_hour_index - 7*24]])
             feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
+            self.numerical_features = self.modelC_features + [lzhub + '_SPP']
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
+
+        if model_type == 'LSTM':
+            for dt, price in dflzhub.iteritems():
+                pred_hour_index = dflzhub.index.get_loc(dt)
+                if pred_hour_index - 7*24 >= 0:
+                    features.append([work_day_or_holiday(dt),
+                                          dt.hour,
+                                          dt.weekday(),
+                                          dt.month,
+                                          dflzhub.iloc[pred_hour_index - 1*24],
+                                          dflzhub.iloc[pred_hour_index - 2*24],
+                                          dflzhub.iloc[pred_hour_index - 3*24],
+                                          dflzhub.iloc[pred_hour_index - 4*24],
+                                          dflzhub.iloc[pred_hour_index - 5*24],
+                                          dflzhub.iloc[pred_hour_index - 6*24],
+                                          dflzhub.iloc[pred_hour_index - 7*24]])
+            feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)', 'P(h-110)', 'P(h-134)', 'P(h-168)']
+            self.numerical_features = self.LSTM_features + [lzhub + '_SPP']
+            idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
+
         # features dataframe before one-hot encoding and normalization of numerical features
         self.features_df = pd.DataFrame(data=features,
                                    index=idx_wout_1st_week,
                                    columns=feature_labels)
-    
+
         self.features_df = encode_onehot(self.features_df, 'Day')
         self.features_df = encode_onehot(self.features_df, 'Month')
         self.features_df = encode_onehot(self.features_df, 'Hour')
@@ -165,36 +196,18 @@ class Feature_Processor(Query_ERCOT_DB):
         return self.features_df
     
 
-    def scale_num_features(self, lzhub, model, df, method, set_type = 'Train'):
-        modelA_features = ['P(h-24)', 'P(h-168)']
-        modelB_features = ['P(h-24)', 'P(h-25)', 'P(h-47)', 'P(h-48)', 'P(h-72)', 'P(h-120)', 'P(h-144)', 'P(h-167)', 'P(h-168)']
-        modelC_features = ['FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
-        numerical_features = []
-        if model == 'A':
-            numerical_features = modelA_features[:]
-        if model == 'B':
-            numerical_features = modelB_features[:]
-        if model == 'C':
-            numerical_features = modelC_features[:]
-        numerical_features.append(lzhub + '_SPP')
+    def inverse_scale_testing(self):
+        return self.data_scaler.inverse_scale(self.test_df, self.numerical_features)[self.lzhub].as_matrix()
 
-            
-        if method == 'L2_norm':
-            output_norm = np.linalg.norm(df[lzhub + '_SPP'].as_matrix())
-            df = normalize(df, numerical_features)
-            return df, output_norm
-        
-        if method == 'standard_scale':
-            df = self.standard_scale(df, numerical_features, set_type)
-            return df
-        
-        if method == 'robust_scale':
-            df = robust_scale(df, numerical_features)
-            return df
-        if method == 'max_abs_scale':
-            df = max_abs_scale(df, numerical_features)
-            return df
-   
+    def inverse_scale_validation(self):
+        return self.data_scaler.inverse_scale(self.val_df, self.numerical_features)[self.lzhub].as_matrix()
+
+    def inverse_scale_prediction(self, y_pred):
+        test_copy = pd.DataFrame.copy(self.test_df)
+        test_copy[self.lzhub] = y_pred
+        return self.data_scaler.inverse_scale(test_copy, self.numerical_features)[self.lzhub].as_matrix()
+
+
     '''
     Plots the prices for all load zones and hubs for the specified date range
     '''
@@ -216,7 +229,8 @@ class Feature_Processor(Query_ERCOT_DB):
         20% of each month for validation
         20% of each month for testing
     '''
-    def train_test_validate(self, train_size=0.6, test_size=0.2):
+    def train_test_validate(self, scaling = 'standard', train_size=0.6, test_size=0.2):
+        self.data_scaler = Data_Scaler(scaling)
         ft = self.features_df
         train_indices = []
         test_indices = []
@@ -241,34 +255,14 @@ class Feature_Processor(Query_ERCOT_DB):
         for i in val_indices:
             val_dfs.append(ft.iloc[i:i+HRS_PER_DAY])
         self.val_df = pd.concat(val_dfs)
+        self.train_df = self.data_scaler.scale_training_data(self.train_df, self.numerical_features)
+        self.test_df = self.data_scaler.scale_testing_data(self.test_df, self.numerical_features)
+        self.val_df = self.data_scaler.scale_testing_data(self.val_df, self.numerical_features)
         return self.train_df, self.val_df, self.test_df
     
     def convert_dfs_to_numpy(self,df):
         num_features = df.as_matrix().shape[1]
-        return (df.ix[:, 0:num_features-1].as_matrix(), df.ix[:, num_features-1].as_matrix()) 
-
-    def standard_scale(self, df, cols, set_type):
-        if set_type == 'Train':
-            self.standard_scaler = preprocessing.StandardScaler()
-            df[cols] = self.standard_scaler.fit_transform(df[cols])
-        else:
-            df[cols] = self.standard_scaler.transform(df[cols])
-        return df
-
-    def inverse_standard_scale(self, lzhub, model, df):
-        modelA_features = ['P(h-24)', 'P(h-168)']
-        modelB_features = ['P(h-24)', 'P(h-25)', 'P(h-47)', 'P(h-48)', 'P(h-72)', 'P(h-120)', 'P(h-144)', 'P(h-167)', 'P(h-168)']
-        modelC_features = ['FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
-        numerical_features = []
-        if model == 'A':
-            numerical_features = modelA_features[:]
-        if model == 'B':
-            numerical_features = modelB_features[:]
-        if model == 'C':
-            numerical_features = modelC_features[:]
-        numerical_features.append(lzhub + '_SPP')
-        print(numerical_features)
-        return self.standard_scaler.inverse_transform(df[numerical_features])
+        return (df.ix[:, 0:num_features-1].as_matrix(), df.ix[:, num_features-1].as_matrix())
 
 def string_to_date(string_date):
     return datetime.strptime(string_date, "%Y-%m-%d %H")
@@ -292,28 +286,6 @@ def encode_onehot(df, cols):
     one_hot_df = pd.DataFrame(data=data, index=index, columns=[cols + '%s' % i for i in range(data.shape[1])])
     del df[cols]
     return df.join(one_hot_df, how='inner')
-
-def max_abs_scale(df,cols):
-    max_abs_scaler = preprocessing.MaxAbsScaler()
-    df[cols] = max_abs_scaler.fit_transform(df[cols])
-    return df
-
-def min_max_scale(df,cols):
-    min_max_scaler = preprocessing.MinMaxScaler()
-    df[cols] = min_max_scaler.fit_transform(df[cols])
-    return df
-
-
-
-def robust_scale(df,cols):
-    rscaler = preprocessing.RobustScaler()
-    df[cols] = rscaler.fit_transform(df[cols])
-    return df
-
-def normalize(df,cols):
-    normalizer = preprocessing.Normalizer()
-    df[cols] = normalizer.fit_transform(df[cols])
-    return df
 
 def sample_month(month_index, train_size, test_size):
     np.random.seed(22943)
