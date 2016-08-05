@@ -164,27 +164,6 @@ class Feature_Processor(Query_ERCOT_DB):
             feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
             self.numerical_features = self.modelC_features + [lzhub + '_SPP']
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
-
-        if model_type == 'LSTM':
-            for dt, price in dflzhub.iteritems():
-                pred_hour_index = dflzhub.index.get_loc(dt)
-                if pred_hour_index - 7*24 >= 0:
-                    features.append([work_day_or_holiday(dt),
-                                          dt.hour,
-                                          dt.weekday(),
-                                          dt.month,
-                                          dflzhub.iloc[pred_hour_index - 1*24],
-                                          dflzhub.iloc[pred_hour_index - 2*24],
-                                          dflzhub.iloc[pred_hour_index - 3*24],
-                                          dflzhub.iloc[pred_hour_index - 4*24],
-                                          dflzhub.iloc[pred_hour_index - 5*24],
-                                          dflzhub.iloc[pred_hour_index - 6*24],
-                                          dflzhub.iloc[pred_hour_index - 7*24]])
-            feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)', 'P(h-110)', 'P(h-134)', 'P(h-168)']
-            self.numerical_features = self.LSTM_features + [lzhub + '_SPP']
-            idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
-
-        # features dataframe before one-hot encoding and normalization of numerical features
         self.features_df = pd.DataFrame(data=features,
                                    index=idx_wout_1st_week,
                                    columns=feature_labels)
@@ -193,6 +172,27 @@ class Feature_Processor(Query_ERCOT_DB):
         self.features_df = encode_onehot(self.features_df, 'Month')
         self.features_df = encode_onehot(self.features_df, 'Hour')
         self.features_df = self.features_df.join(dflzhub, how='left')
+
+
+        if model_type == 'LSTM':
+            for dt, price in dflzhub.iteritems():
+                features.append([price, work_day_or_holiday(dt), dt.hour, dt.weekday(), dt.month])
+            feature_labels = ['Price', 'Holiday', 'Hour', 'Day', 'Month']
+            features_df = pd.DataFrame(data=features, index = dflzhub.index, columns = feature_labels)
+            features_df = encode_onehot(features_df, 'Day')
+            features_df = encode_onehot(features_df, 'Month')
+            features_df = encode_onehot(features_df, 'Hour')
+            sequence_list =[]
+            for dt, row in dflzhub.iterrows():
+                pred_hour_index = dflzhub.index.get_loc(dt)
+                if pred_hour_index - 7*24 >= 0:
+                    sequence = [dflzhub.iloc[pred_hour_index - 24*i] for i in pd.arange(1, 7)]
+                    sequence_list.append(sequence)
+            feature_labels = ['Price', 'Holiday', 'Hour', 'Day', 'Month']
+            self.numerical_features = ['Price']
+            idx_wout_1st_week = list(dflzhub.index.values)
+            self.features_df = sequence_list
+
         return self.features_df
     
 
@@ -306,5 +306,9 @@ def sample_month(month_index, train_size, test_size):
 
 
 
-
+if __name__ == '__main__':
+    fp = Feature_Processor()
+    fp.query('2012-01-01', '2012-12-31')
+    fp.construct_feature_vector_matrix('LZ_WEST', 'LSTM')
+    print(fp.features_df)
 
