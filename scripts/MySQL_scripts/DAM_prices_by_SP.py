@@ -64,8 +64,6 @@ class Feature_Processor(Query_ERCOT_DB):
         self.modelA_features = ['P(h-24)', 'P(h-168)']
         self.modelB_features = ['P(h-24)', 'P(h-25)', 'P(h-47)', 'P(h-48)', 'P(h-72)', 'P(h-120)', 'P(h-144)', 'P(h-167)', 'P(h-168)']
         self.modelC_features = ['FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
-        self.LSTM_features = ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)', 'P(h-110)', 'P(h-134)', 'P(h-168)']
-
 
     '''
     Query for all prices for all load zones and hubs for specified date range
@@ -110,7 +108,6 @@ class Feature_Processor(Query_ERCOT_DB):
         load_df = self.df[lzhub + '_load']
         features = []
         feature_labels = None
-        numerical_features = None
         idx_wout_1st_week = None
         
         if model_type == 'A':
@@ -164,6 +161,8 @@ class Feature_Processor(Query_ERCOT_DB):
             feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
             self.numerical_features = self.modelC_features + [lzhub + '_SPP']
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
+
+
         self.features_df = pd.DataFrame(data=features,
                                    index=idx_wout_1st_week,
                                    columns=feature_labels)
@@ -172,26 +171,6 @@ class Feature_Processor(Query_ERCOT_DB):
         self.features_df = encode_onehot(self.features_df, 'Month')
         self.features_df = encode_onehot(self.features_df, 'Hour')
         self.features_df = self.features_df.join(dflzhub, how='left')
-
-
-        if model_type == 'LSTM':
-            for dt, price in dflzhub.iteritems():
-                features.append([price, work_day_or_holiday(dt), dt.hour, dt.weekday(), dt.month])
-            feature_labels = ['Price', 'Holiday', 'Hour', 'Day', 'Month']
-            features_df = pd.DataFrame(data=features, index = dflzhub.index, columns = feature_labels)
-            features_df = encode_onehot(features_df, 'Day')
-            features_df = encode_onehot(features_df, 'Month')
-            features_df = encode_onehot(features_df, 'Hour')
-            sequence_list =[]
-            for dt, row in dflzhub.iterrows():
-                pred_hour_index = dflzhub.index.get_loc(dt)
-                if pred_hour_index - 7*24 >= 0:
-                    sequence = [dflzhub.iloc[pred_hour_index - 24*i] for i in pd.arange(1, 7)]
-                    sequence_list.append(sequence)
-            feature_labels = ['Price', 'Holiday', 'Hour', 'Day', 'Month']
-            self.numerical_features = ['Price']
-            idx_wout_1st_week = list(dflzhub.index.values)
-            self.features_df = sequence_list
 
         return self.features_df
     
@@ -259,7 +238,7 @@ class Feature_Processor(Query_ERCOT_DB):
         self.test_df = self.data_scaler.scale_testing_data(self.test_df, self.numerical_features)
         self.val_df = self.data_scaler.scale_testing_data(self.val_df, self.numerical_features)
         return self.train_df, self.val_df, self.test_df
-    
+
     def convert_dfs_to_numpy(self,df):
         num_features = df.as_matrix().shape[1]
         return (df.ix[:, 0:num_features-1].as_matrix(), df.ix[:, num_features-1].as_matrix())
@@ -311,4 +290,5 @@ if __name__ == '__main__':
     fp.query('2012-01-01', '2012-12-31')
     fp.construct_feature_vector_matrix('LZ_WEST', 'LSTM')
     print(fp.features_df)
+    print(fp.target_df)
 

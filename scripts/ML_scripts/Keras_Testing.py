@@ -9,11 +9,12 @@ from keras.models import Sequential
 from keras.layers import Dense, LSTM, SimpleRNN
 sys.path.insert(0, '/home/kenlee/energy_market_project/scripts/MySQL_scripts/')
 from DAM_prices_by_SP import Feature_Processor
+from Sequence_Feature_Processor import Sequence_Feature_Processor
 
 class Keras_NN(object):
 
-    def __init__(self):
-        self.feature_processor = Feature_Processor()
+    def __init__(self, type='MLP'):
+        self.type = type
         self.model = None
         self.feature_df = None
         self.train_df = None
@@ -30,50 +31,47 @@ class Keras_NN(object):
         self.MAPE = None
         self.TheilU1 = None
         self.TheilU2 = None
+        if type == 'MLP':
+            self.feature_processor = Feature_Processor()
+        else:
+            self.feature_processor = Sequence_Feature_Processor()
 
     def query_db(self, start_date, end_date):
         self.feature_processor.query(start_date, end_date)
 
     def load_data(self, lzhub, model_type, scaling_method='standard'):
         self.feature_df = self.feature_processor.construct_feature_vector_matrix(lzhub, model_type)
-        self.train_df, self.val_df, self.test_df = self.feature_processor.train_test_validate(scaling=scaling_method)
-        self.x_train, self.y_train = self.feature_processor.convert_dfs_to_numpy(self.train_df)
-        self.x_test, self.y_test = self.feature_processor.convert_dfs_to_numpy(self.test_df)
-        self.x_val, self.y_val = self.feature_processor.convert_dfs_to_numpy(self.val_df)
+        if self.type == 'MLP':
+            self.train_df, self.val_df, self.test_df = self.feature_processor.train_test_validate(scaling=scaling_method)
+            self.x_train, self.y_train = self.feature_processor.convert_dfs_to_numpy(self.train_df)
+            self.x_test, self.y_test = self.feature_processor.convert_dfs_to_numpy(self.test_df)
+            self.x_val, self.y_val = self.feature_processor.convert_dfs_to_numpy(self.val_df)
+        if self.type != 'MLP':
+            self.x_train, self.y_train, self.x_test, self.y_test, self.x_val, self.y_val = self.feature_processor.train_test_validate()
 
 
-    def create_model(self, hidden_layers, type = 'MLP'):
-        if type == 'MLP':
+    def create_model(self, hidden_layers):
+        if self.type == 'MLP':
             self.model = Sequential()
             self.model.add(Dense(hidden_layers, init = 'glorot_uniform', activation = 'tanh', input_dim = self.x_train.shape[1]))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
             self.model.compile(loss='mean_squared_error', optimizer='sgd', metrics = ['accuracy'])
-            self.model.summary()
-        if type == 'SimpleRNN':
+        if self.type == 'SimpleRNN':
             self.model = Sequential()
-            self.model.add(SimpleRNN(hidden_layers, input_dim = self.x_train.shape[1]))
+            self.model.add(SimpleRNN(hidden_layers, input_dim = self.x_train.shape[2], input_length = self.x_train.shape[1]))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
             self.model.compile(loss='mean_squared_error', optimizer='RMSprop')
-            self.x_train = np.reshape(self.x_train, (self.x_train.shape[0], 1, self.x_train.shape[1]))
-            self.x_test = np.reshape(self.x_test, (self.x_test.shape[0], 1, self.x_test.shape[1]))
-            self.x_val = np.reshape(self.x_val, (self.x_val.shape[0], 1, self.x_val.shape[1]))
-        if type == 'LSTM':
+        if self.type == 'LSTM':
             self.model = Sequential()
-            self.model.add(LSTM(hidden_layers, input_dim = self.x_train.shape[1]))
+            self.model.add(LSTM(hidden_layers, input_dim = self.x_train.shape[2], input_length = self.x_train.shape[1]))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
             self.model.compile(loss='mean_squared_error', optimizer='adam')
-            self.x_train = np.reshape(self.x_train, (self.x_train.shape[0], 1, self.x_train.shape[1]))
-            self.x_test = np.reshape(self.x_test, (self.x_test.shape[0], 1, self.x_test.shape[1]))
-            self.x_val = np.reshape(self.x_val, (self.x_val.shape[0], 1, self.x_val.shape[1]))
-        if type == 'StackedLSTM':
+        if self.type == 'StackedLSTM':
             self.model = Sequential()
             self.model.add(LSTM(hidden_layers, return_sequences=True, input_dim = self.x_train.shape[1]))
             self.model.add(LSTM(hidden_layers))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
             self.model.compile(loss='mean_squared_error', optimizer='adam')
-            self.x_train = np.reshape(self.x_train, (self.x_train.shape[0], 1, self.x_train.shape[1]))
-            self.x_test = np.reshape(self.x_test, (self.x_test.shape[0], 1, self.x_test.shape[1]))
-            self.x_val = np.reshape(self.x_val, (self.x_val.shape[0], 1, self.x_val.shape[1]))
 
 
 
@@ -81,9 +79,15 @@ class Keras_NN(object):
         self.model.fit(self.x_train, self.y_train, validation_data=(self.x_val, self.y_val), nb_epoch=epochs)
 
     def predict(self):
-        self.y_actual = self.feature_processor.inverse_scale_testing()
-        self.y_pred = self.model.predict(self.x_test)
-        self.y_pred = self.feature_processor.inverse_scale_prediction(self.y_pred)
+        if self.type == 'MLP':
+            self.y_actual = self.feature_processor.inverse_scale_testing()
+            self.y_pred = self.model.predict(self.x_test)
+            self.y_pred = self.feature_processor.inverse_scale_prediction(self.y_pred)
+        if self.type != 'MLP':
+            self.y_pred = self.model.predict(self.x_test)
+            self.y_actual = self.y_test
+            self.y_pred = self.feature_processor.inverse_scale(self.y_pred)
+            self.y_actual = self.feature_processor.inverse_scale(self.y_actual)
 
     def compute_metrics(self):
         self.MAPE = np.sum(np.divide(np.abs(self.y_actual - self.y_pred), self.y_actual)*100)/self.y_actual.shape[0]
@@ -100,12 +104,16 @@ class Keras_NN(object):
         plt.show()
 
 if __name__ == '__main__':
-    kMLP = Keras_NN()
-    kMLP.query_db('2014-01-01', '2014-12-31')
+    kMLP = Keras_NN(type='LSTM')
+    kMLP.query_db('2012-01-01', '2012-12-31')
     kMLP.load_data('LZ_WEST', 'A')
-    kMLP.create_model(hidden_layers=30, type='LSTM')
-    kMLP.train_model(epochs=100)
+    print(kMLP.x_train.shape)
+    kMLP.create_model(hidden_layers=30)
+
+    kMLP.train_model(epochs=50)
     kMLP.predict()
+    print(kMLP.y_pred.shape)
+    print(kMLP.y_actual.shape)
     kMLP.compute_metrics()
     print(kMLP.MAPE)
     print(kMLP.TheilU1)
