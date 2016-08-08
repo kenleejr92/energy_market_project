@@ -33,7 +33,7 @@ class Sequence_Feature_Processor(Feature_Processor):
             pred_hour_index = self.features_df.index.get_loc(dt)
             if pred_hour_index - 7*24 >= 0:
                 self.targets.append(self.features_df.iloc[pred_hour_index]['Price'])
-                sequence = [self.features_df.iloc[pred_hour_index - 24*i] for i in np.arange(1, 8)]
+                sequence = [self.features_df.iloc[pred_hour_index - i] for i in np.arange(24, 49)]
                 self.sequences.append(sequence)
         self.targets = np.array(self.targets)
         self.sequences = np.array(self.sequences)
@@ -46,28 +46,34 @@ class Sequence_Feature_Processor(Feature_Processor):
         targets = self.targets
 
         for i in range(MONTHS_PER_YEAR):
-            train_i, test_i, val_i = sample_month(i, train_size, test_size)
+            train_i, test_i, val_i = sample_month(i, train_size, test_size, sequences.shape[0])
             train_indices = train_indices + train_i
             test_indices = test_indices + test_i
             val_indices = val_indices + val_i
-        train_indices = [i*HRS_PER_DAY for i in train_indices]
-        test_indices = [i*HRS_PER_DAY for i in test_indices]
-        val_indices = [i*HRS_PER_DAY for i in val_indices]
+        # train_indices = [i*HRS_PER_DAY for i in train_indices]
+        # test_indices = [i*HRS_PER_DAY for i in test_indices]
+        # val_indices = [i*HRS_PER_DAY for i in val_indices]
         for i in train_indices:
-            self.train_features.append(sequences[i:i+HRS_PER_DAY, :, :])
-            self.train_targets.append(targets[i:i+HRS_PER_DAY])
-        self.train_features = np.concatenate(self.train_features, axis=0)
-        self.train_targets = np.concatenate(self.train_targets, axis=0)
+            self.train_features.append(sequences[i, :, :])
+            self.train_targets.append(targets[i])
+        self.train_features = np.array(self.train_features)
+        self.train_targets = np.array(self.train_targets)
+        # self.train_features = np.concatenate(self.train_features, axis=0)
+        # self.train_targets = np.concatenate(self.train_targets, axis=0)
         for i in test_indices:
-            self.test_features.append(sequences[i:i+HRS_PER_DAY, :, :])
-            self.test_targets.append(targets[i:i+HRS_PER_DAY])
-        self.test_features = np.concatenate(self.test_features, axis=0)
-        self.test_targets = np.concatenate(self.test_targets, axis=0)
+            self.test_features.append(sequences[i, :, :])
+            self.test_targets.append(targets[i])
+        # self.test_features = np.concatenate(self.test_features, axis=0)
+        # self.test_targets = np.concatenate(self.test_targets, axis=0)
+        self.test_features = np.array(self.test_features)
+        self.test_targets = np.array(self.test_targets)
         for i in val_indices:
-            self.val_features.append(sequences[i:i+HRS_PER_DAY, :, :])
-            self.val_targets.append(targets[i:i+HRS_PER_DAY])
-        self.val_features = np.concatenate(self.val_features, axis=0)
-        self.val_targets = np.concatenate(self.val_targets, axis=0)
+            self.val_features.append(sequences[i, :, :])
+            self.val_targets.append(targets[i])
+        # self.val_features = np.concatenate(self.val_features, axis=0)
+        # self.val_targets = np.concatenate(self.val_targets, axis=0)
+        self.val_features = np.array(self.val_features)
+        self.val_targets = np.array(self.val_targets)
 
         self.sequence_scaler = Sequence_Scaler()
         self.train_features, self.train_targets = self.sequence_scaler.scale_training_data(self.train_features, self.train_targets)
@@ -82,8 +88,10 @@ class Sequence_Feature_Processor(Feature_Processor):
 
 if __name__ == '__main__':
     sfp  = Sequence_Feature_Processor()
-    sfp.query('2012-01-01', '2012-12-31')
+    sfp.query('2015-01-01', '2015-12-31')
     sfp.construct_feature_vector_matrix('LZ_WEST', 'LSTM')
     sfp.train_test_validate()
+    # print(sfp.sequences)
+    # print(sfp.targets)
     print(sfp.train_features)
-    print(sfp.train_targets.shape)
+    print(sfp.train_targets)

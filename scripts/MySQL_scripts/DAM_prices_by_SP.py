@@ -22,7 +22,7 @@ from Query_ERCOT_DB import Query_ERCOT_DB
 from Data_Scaler import Data_Scaler
 
 MONTHS_PER_YEAR = 12
-DAYS_PER_MONTH = 30
+DAYS_PER_MONTH = 28
 HRS_PER_DAY = 24
 
 # Acquire DAM SPP for all settlement points for a specific date range
@@ -215,25 +215,25 @@ class Feature_Processor(Query_ERCOT_DB):
         test_indices = []
         val_indices = []
         for i in range(MONTHS_PER_YEAR):
-            train_i, test_i, val_i = sample_month(i, train_size, test_size)
+            train_i, test_i, val_i = sample_month(i, train_size, test_size, self.features_df.shape[0])
             train_indices = train_indices + train_i
             test_indices = test_indices + test_i
             val_indices = val_indices + val_i
-        train_indices = [i*HRS_PER_DAY for i in train_indices]
-        test_indices = [i*HRS_PER_DAY for i in test_indices]
-        val_indices = [i*HRS_PER_DAY for i in val_indices]
+        # train_indices = [i*HRS_PER_DAY for i in train_indices]
+        # test_indices = [i*HRS_PER_DAY for i in test_indices]
+        # val_indices = [i*HRS_PER_DAY for i in val_indices]
         train_dfs = []
         test_dfs = []
         val_dfs = []
         for i in train_indices:
-            train_dfs.append(ft.iloc[i:i+HRS_PER_DAY])
-        self.train_df = pd.concat(train_dfs)
+            train_dfs.append(ft.iloc[i].tolist())
+        self.train_df = pd.DataFrame(train_dfs, columns=self.features_df.columns)
         for i in test_indices:
-            test_dfs.append(ft.iloc[i:i+HRS_PER_DAY])
-        self.test_df = pd.concat(test_dfs)
+            test_dfs.append(ft.iloc[i].tolist())
+        self.test_df = pd.DataFrame(test_dfs, columns=self.features_df.columns)
         for i in val_indices:
-            val_dfs.append(ft.iloc[i:i+HRS_PER_DAY])
-        self.val_df = pd.concat(val_dfs)
+            val_dfs.append(ft.iloc[i].tolist())
+        self.val_df = pd.DataFrame(val_dfs, columns=self.features_df.columns)
         self.train_df = self.data_scaler.scale_training_data(self.train_df, self.numerical_features)
         self.test_df = self.data_scaler.scale_testing_data(self.test_df, self.numerical_features)
         self.val_df = self.data_scaler.scale_testing_data(self.val_df, self.numerical_features)
@@ -266,29 +266,43 @@ def encode_onehot(df, cols):
     del df[cols]
     return df.join(one_hot_df, how='inner')
 
-def sample_month(month_index, train_size, test_size):
+def sample_month(month_index, train_size, test_size, sample_size):
     np.random.seed(22943)
-    indices = np.arange(0, DAYS_PER_MONTH)
+    indices = np.arange(0, HRS_PER_DAY*DAYS_PER_MONTH)
     set_indices = set(indices)
     train_indices = np.random.choice(indices,
-                                  int(DAYS_PER_MONTH*train_size),
+                                  int(HRS_PER_DAY*DAYS_PER_MONTH*train_size),
                                   replace=False).tolist()
     test_indices = np.random.choice(list(set_indices.difference(set(train_indices))),
-                                 int(DAYS_PER_MONTH*test_size),
+                                 int(HRS_PER_DAY*DAYS_PER_MONTH*test_size),
                                  replace=False).tolist()
     val_indices = list(set_indices.difference(set(train_indices)).difference(test_indices))
+    train_i = []
+    test_i = []
+    val_i = []
 
-    train_indices = [i + month_index*DAYS_PER_MONTH for i in train_indices]
-    test_indices = [i + month_index*DAYS_PER_MONTH for i in test_indices]
-    val_indices = [i + month_index*DAYS_PER_MONTH for i in val_indices]
-    return train_indices, test_indices, val_indices
+    for i in train_indices:
+        shifted_index = i + month_index*HRS_PER_DAY*DAYS_PER_MONTH
+        if shifted_index > sample_size:
+            shifted_index = sample_size - 1
+        train_i += [shifted_index]
+    for i in test_indices:
+        shifted_index = i + month_index*HRS_PER_DAY*DAYS_PER_MONTH
+        if shifted_index > sample_size:
+            shifted_index = sample_size - 1
+        test_i += [shifted_index]
+    for i in val_indices:
+        shifted_index = i + month_index*HRS_PER_DAY*DAYS_PER_MONTH
+        if shifted_index > sample_size:
+            shifted_index = sample_size - 1
+        val_i += [shifted_index]
+    return train_i, test_i, val_i
 
 
 
 if __name__ == '__main__':
     fp = Feature_Processor()
-    fp.query('2012-01-01', '2012-12-31')
-    fp.construct_feature_vector_matrix('LZ_WEST', 'LSTM')
-    print(fp.features_df)
-    print(fp.target_df)
-
+    fp.query('2015-01-01', '2015-12-31')
+    fp.construct_feature_vector_matrix('LZ_WEST', 'A')
+    fp.train_test_validate()
+    print(fp.numerical_features)

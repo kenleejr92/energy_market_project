@@ -80,8 +80,8 @@ class Keras_NN(object):
 
     def predict(self):
         if self.type == 'MLP':
-            self.y_actual = self.feature_processor.inverse_scale_testing()
             self.y_pred = self.model.predict(self.x_test)
+            self.y_actual = self.feature_processor.inverse_scale_testing()
             self.y_pred = self.feature_processor.inverse_scale_prediction(self.y_pred)
         if self.type != 'MLP':
             self.y_pred = self.model.predict(self.x_test)
@@ -104,19 +104,16 @@ class Keras_NN(object):
         plt.show()
 
 if __name__ == '__main__':
-    kMLP = Keras_NN(type='LSTM')
+    kMLP = Keras_NN(type='SimpleRNN')
     kMLP.query_db('2012-01-01', '2012-12-31')
-    kMLP.load_data('LZ_WEST', 'A')
-    print(kMLP.x_train.shape)
+    kMLP.load_data('LZ_NORTH', 'C')
     kMLP.create_model(hidden_layers=30)
-
     kMLP.train_model(epochs=50)
     kMLP.predict()
-    print(kMLP.y_pred.shape)
-    print(kMLP.y_actual.shape)
     kMLP.compute_metrics()
     print(kMLP.MAPE)
     print(kMLP.TheilU1)
+    print(kMLP.TheilU2)
     kMLP.plot_results()
 
 
