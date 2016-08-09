@@ -6,6 +6,7 @@
 
 
 import sys
+import operator
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -29,19 +30,6 @@ HRS_PER_DAY = 24
 class Feature_Processor(Query_ERCOT_DB):
     # list of settlement points is common across all instances of the Feature_Processor class
 
-    table_headers = []
-    Query_ERCOT_DB.c.execute("""SHOW COLUMNS FROM DAM_SPPs""")
-    r = list(Query_ERCOT_DB.c.fetchall())
-    for sp in r:
-        if sp[0] == "delivery_date" or sp[0] == "hour_ending":
-            continue
-        table_headers.append(sp[0])
-    Query_ERCOT_DB.c.execute("""SHOW COLUMNS FROM Load_by_LZ""")
-    r = list(Query_ERCOT_DB.c.fetchall())
-    for sp in r:
-        if sp[0] == "delivery_date" or sp[0] == "hour_ending":
-            continue
-        table_headers.append(sp[0])
     '''
     Query the list of settlement points and remove the heading "Settlement Point"
     self.start_date - start date of query
@@ -61,9 +49,15 @@ class Feature_Processor(Query_ERCOT_DB):
         self.data_scaler = None
         self.numerical_features = None
         self.lzhub = None
-        self.modelA_features = ['P(h-24)', 'P(h-168)']
         self.modelB_features = ['P(h-24)', 'P(h-25)', 'P(h-47)', 'P(h-48)', 'P(h-72)', 'P(h-120)', 'P(h-144)', 'P(h-167)', 'P(h-168)']
         self.modelC_features = ['FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
+        self.table_headers = []
+        Query_ERCOT_DB.c.execute("""SHOW COLUMNS FROM DAM_SPPs""")
+        r = list(Query_ERCOT_DB.c.fetchall())
+        for sp in r:
+            if sp[0] == "delivery_date" or sp[0] == "hour_ending":
+                continue
+            self.table_headers.append(sp[0])
 
     '''
     Query for all prices for all load zones and hubs for specified date range
@@ -73,8 +67,6 @@ class Feature_Processor(Query_ERCOT_DB):
         self.start_date = sd
         self.end_date = ed
         Query_ERCOT_DB.c.execute("""SELECT * FROM DAM_SPPs
-                INNER JOIN Load_by_LZ
-                USING (delivery_date,hour_ending)
                 WHERE DAM_SPPs.delivery_date > "%s"
                 AND DAM_SPPs.delivery_date < "%s"
                 ORDER BY DAM_SPPs.delivery_date, DAM_SPPs.hour_ending""" % (sd, ed))
@@ -105,7 +97,6 @@ class Feature_Processor(Query_ERCOT_DB):
     def construct_feature_vector_matrix(self, lzhub, model_type):
         self.lzhub = lzhub + '_SPP'
         dflzhub = self.df[lzhub + '_SPP']
-        load_df = self.df[lzhub + '_load']
         features = []
         feature_labels = None
         idx_wout_1st_week = None
@@ -118,58 +109,31 @@ class Feature_Processor(Query_ERCOT_DB):
                                           dt.hour,
                                           dt.weekday(),
                                           dt.month,
-                                          dflzhub.iloc[pred_hour_index - 1*24],
-                                          dflzhub.iloc[pred_hour_index - 7*24]])
-            feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'P(h-24)', 'P(h-168)']
-            self.numerical_features = self.modelA_features + [lzhub + '_SPP']
-            idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
-
-        if model_type == 'B':
-            for dt, price in dflzhub.iteritems():
-                pred_hour_index = dflzhub.index.get_loc(dt)
-                if pred_hour_index - 7*24 >= 0:
-                    features.append([work_day_or_holiday(dt),
-                                          dt.hour,
-                                          dt.weekday(),
-                                          dt.month,
                                           dflzhub.iloc[pred_hour_index - 24],
                                           dflzhub.iloc[pred_hour_index - 25],
-                                          dflzhub.iloc[pred_hour_index - 47],
-                                          dflzhub.iloc[pred_hour_index - 48],
                                           dflzhub.iloc[pred_hour_index - 72],
-                                          dflzhub.iloc[pred_hour_index - 120],
-                                          dflzhub.iloc[pred_hour_index - 144],
-                                          dflzhub.iloc[pred_hour_index - 167],
-                                          dflzhub.iloc[pred_hour_index - 168]])
-            feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'P(h-24)', 'P(h-25)', 'P(h-47)', 'P(h-48)', 'P(h-72)',                              'P(h-120)', 'P(h-144)', 'P(h-167)', 'P(h-168)']
-            self.numerical_features = self.modelB_features + [lzhub + '_SPP']
+                                          dflzhub.iloc[pred_hour_index - 96]])
+            feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'P(h-24)', 'P(h-25)', 'P(h-72)', 'P(h-96)']
+            self.numerical_features = ['P(h-24)', 'P(h-25)', 'P(h-72)', 'P(h-96)'] + [lzhub + '_SPP']
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
 
-        if model_type == 'C':
+
+        if model_type == 'Correlation_Testing':
             for dt, price in dflzhub.iteritems():
                 pred_hour_index = dflzhub.index.get_loc(dt)
                 if pred_hour_index - 7*24 >= 0:
-                    features.append([work_day_or_holiday(dt),
-                                          dt.hour,
-                                          dt.weekday(),
-                                          dt.month,
-                                          load_df.iloc[pred_hour_index],
-                                          dflzhub.iloc[pred_hour_index - 1*24],
-                                          dflzhub.iloc[pred_hour_index - 7*24],
-                                          load_df.iloc[pred_hour_index - 1*24],
-                                          load_df.iloc[pred_hour_index - 7*24]])
-            feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
-            self.numerical_features = self.modelC_features + [lzhub + '_SPP']
+                    features.append([dflzhub.iloc[pred_hour_index - i] for i in range(24, 169)])
+            feature_labels = ['P(h-%s)' % i for i in range(24, 169)]
+            self.numerical_features = ['P(h-%s)' % i for i in range(24, 169)] + [lzhub + '_SPP']
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
-
 
         self.features_df = pd.DataFrame(data=features,
                                    index=idx_wout_1st_week,
                                    columns=feature_labels)
-
-        self.features_df = encode_onehot(self.features_df, 'Day')
-        self.features_df = encode_onehot(self.features_df, 'Month')
-        self.features_df = encode_onehot(self.features_df, 'Hour')
+        if model_type == 'A':
+            self.features_df = encode_onehot(self.features_df, 'Day')
+            self.features_df = encode_onehot(self.features_df, 'Month')
+            self.features_df = encode_onehot(self.features_df, 'Hour')
         self.features_df = self.features_df.join(dflzhub, how='left')
 
         return self.features_df
@@ -243,6 +207,23 @@ class Feature_Processor(Query_ERCOT_DB):
         num_features = df.as_matrix().shape[1]
         return (df.ix[:, 0:num_features-1].as_matrix(), df.ix[:, num_features-1].as_matrix())
 
+    def compute_Pearson_correlation(self):
+        # Correlation analysis
+        data_matrix = self.features_df[self.numerical_features].as_matrix()
+        means = [np.mean(data_matrix[:, i]) for i in range(data_matrix.shape[1])]
+        for i in range(len(means)):
+            data_matrix[:, i] -= means[i]
+        size = data_matrix.shape[0]
+        covariance_matrix = np.dot(np.transpose(data_matrix), data_matrix)/(size - 1)
+        stds = [np.sqrt(covariance_matrix[i, i]) for i in range(covariance_matrix.shape[0])]
+        pearson_correlations = [covariance_matrix[i, -1]/(stds[i]*stds[-1]) for i in range(covariance_matrix.shape[0])]
+        corr_dict = {}
+        for idx,item in enumerate(fp.numerical_features):
+            corr_dict[item] = pearson_correlations[idx]
+        sorted_corr = sorted(corr_dict.items(), key=operator.itemgetter(1), reverse=True)
+        for name, corr in sorted_corr:
+            print('%s, %s' % (name, corr))
+
 def string_to_date(string_date):
     return datetime.strptime(string_date, "%Y-%m-%d %H")
 
@@ -302,7 +283,6 @@ def sample_month(month_index, train_size, test_size, sample_size):
 
 if __name__ == '__main__':
     fp = Feature_Processor()
-    fp.query('2015-01-01', '2015-12-31')
-    fp.construct_feature_vector_matrix('LZ_WEST', 'A')
-    fp.train_test_validate()
-    print(fp.numerical_features)
+    fp.query('2011-01-01', '2015-12-31')
+    fp.construct_feature_vector_matrix('LZ_NORTH', 'Correlation_Testing')
+    fp.compute_Pearson_correlation()

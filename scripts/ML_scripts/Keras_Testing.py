@@ -50,25 +50,25 @@ class Keras_NN(object):
             self.x_train, self.y_train, self.x_test, self.y_test, self.x_val, self.y_val = self.feature_processor.train_test_validate()
 
 
-    def create_model(self, hidden_layers):
-        if self.type == 'MLP':
+    def create_model(self, hidden_layers, type='MLP'):
+        if type == 'MLP':
             self.model = Sequential()
             self.model.add(Dense(hidden_layers, init = 'glorot_uniform', activation = 'tanh', input_dim = self.x_train.shape[1]))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
             self.model.compile(loss='mean_squared_error', optimizer='sgd', metrics = ['accuracy'])
-        if self.type == 'SimpleRNN':
+        if type == 'SimpleRNN':
             self.model = Sequential()
             self.model.add(SimpleRNN(hidden_layers, input_dim = self.x_train.shape[2], input_length = self.x_train.shape[1]))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
             self.model.compile(loss='mean_squared_error', optimizer='RMSprop')
-        if self.type == 'LSTM':
+        if type == 'LSTM':
             self.model = Sequential()
             self.model.add(LSTM(hidden_layers, input_dim = self.x_train.shape[2], input_length = self.x_train.shape[1]))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
             self.model.compile(loss='mean_squared_error', optimizer='adam')
-        if self.type == 'StackedLSTM':
+        if type == 'StackedLSTM':
             self.model = Sequential()
-            self.model.add(LSTM(hidden_layers, return_sequences=True, input_dim = self.x_train.shape[1]))
+            self.model.add(LSTM(hidden_layers, return_sequences=True, input_dim = self.x_train.shape[2], input_length = self.x_train.shape[1]))
             self.model.add(LSTM(hidden_layers))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
             self.model.compile(loss='mean_squared_error', optimizer='adam')
@@ -104,10 +104,10 @@ class Keras_NN(object):
         plt.show()
 
 if __name__ == '__main__':
-    kMLP = Keras_NN(type='SimpleRNN')
+    kMLP = Keras_NN(type='LSTM')
     kMLP.query_db('2012-01-01', '2012-12-31')
-    kMLP.load_data('LZ_NORTH', 'C')
-    kMLP.create_model(hidden_layers=30)
+    kMLP.load_data('LZ_WEST', 'A')
+    kMLP.create_model(hidden_layers=30, type = 'LSTM')
     kMLP.train_model(epochs=50)
     kMLP.predict()
     kMLP.compute_metrics()

@@ -13,17 +13,17 @@ LOAD_ZONES = ['LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST', 'LZ_HOUSTON']
 os.chdir('../test_results')
 f = open('Model_results.csv', 'w+')
 f.write('Model,Zone,Year,MAPE,TheilU1,TheilU2\n')
-kNN = Keras_NN()
+kNN = Keras_NN(type='LSTM')
 for sd, ed in DATES:
     kNN.query_db(sd, ed)
     for lz in LOAD_ZONES:
-        # Test MLP with Model A
-        kNN.load_data(lz, 'A')
-        kNN.create_model(hidden_layers=30, type='MLP')
-        kNN.train_model(epochs=150)
-        kNN.predict()
-        kNN.compute_metrics()
-        f.write('%s,%s,%s,%f,%f,%f\n' % ('MLPA', lz, sd[:4], kNN.MAPE, kNN.TheilU1, kNN.TheilU2))
+        # # Test MLP with Model A
+        # kNN.load_data(lz, 'A')
+        # kNN.create_model(hidden_layers=30, type='MLP')
+        # kNN.train_model(epochs=150)
+        # kNN.predict()
+        # kNN.compute_metrics()
+        # f.write('%s,%s,%s,%f,%f,%f\n' % ('MLPA', lz, sd[:4], kNN.MAPE, kNN.TheilU1, kNN.TheilU2))
 
 
         # Test Recurrent Neural Networks
@@ -41,4 +41,12 @@ for sd, ed in DATES:
         kNN.predict()
         kNN.compute_metrics()
         f.write('%s,%s,%s,%f,%f,%f\n' % ('LSTM', lz, sd[:4], kNN.MAPE, kNN.TheilU1, kNN.TheilU2))
+
+        # Test LSTM with Model LSTM
+        kNN.load_data(lz, 'LSTM')
+        kNN.create_model(hidden_layers=30, type='StackedLSTM')
+        kNN.train_model(epochs=50)
+        kNN.predict()
+        kNN.compute_metrics()
+        f.write('%s,%s,%s,%f,%f,%f\n' % ('StackedLSTM', lz, sd[:4], kNN.MAPE, kNN.TheilU1, kNN.TheilU2))
 f.close()

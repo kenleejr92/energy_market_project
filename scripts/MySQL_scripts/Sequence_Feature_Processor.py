@@ -8,7 +8,7 @@ from Sequence_Scaler import Sequence_Scaler
 class Sequence_Feature_Processor(Feature_Processor):
 
     def __init__(self):
-        self.sequence_scaler = []
+        self.sequence_scaler = None
         self.sequences = []
         self.targets = []
         self.train_features = []
@@ -17,8 +17,11 @@ class Sequence_Feature_Processor(Feature_Processor):
         self.train_targets = []
         self.test_targets = []
         self.val_targets = []
+        super(Sequence_Feature_Processor, self).__init__()
 
     def construct_feature_vector_matrix(self, lzhub, model_type):
+        self.targets = []
+        self.sequences =[]
         self.lzhub = lzhub + '_SPP'
         dflzhub = self.df[lzhub + '_SPP']
         features = []
@@ -33,12 +36,23 @@ class Sequence_Feature_Processor(Feature_Processor):
             pred_hour_index = self.features_df.index.get_loc(dt)
             if pred_hour_index - 7*24 >= 0:
                 self.targets.append(self.features_df.iloc[pred_hour_index]['Price'])
-                sequence = [self.features_df.iloc[pred_hour_index - i] for i in np.arange(24, 49)]
+                sequence = []
+                sequence.append(self.features_df.iloc[pred_hour_index - 24])
+                sequence.append(self.features_df.iloc[pred_hour_index - 25])
+                sequence.append(self.features_df.iloc[pred_hour_index - 72])
+                sequence.append(self.features_df.iloc[pred_hour_index - 96])
+                # sequence = [self.features_df.iloc[pred_hour_index - 24*i] for i in np.arange(1, 8)]
                 self.sequences.append(sequence)
         self.targets = np.array(self.targets)
         self.sequences = np.array(self.sequences)
 
     def train_test_validate(self, scaling='standard', train_size=0.6, test_size=0.2):
+        self.train_features = []
+        self.test_features = []
+        self.val_features = []
+        self.train_targets = []
+        self.test_targets = []
+        self.val_targets = []
         train_indices = []
         test_indices = []
         val_indices = []
@@ -85,6 +99,8 @@ class Sequence_Feature_Processor(Feature_Processor):
         dim1 = y.shape[0]
         y = np.reshape(y, (dim1,))
         return self.sequence_scaler.inverse_scale(y)
+
+
 
 if __name__ == '__main__':
     sfp  = Sequence_Feature_Processor()
