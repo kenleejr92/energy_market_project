@@ -5,7 +5,6 @@
 
 
 
-import sys
 import operator
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,6 +20,8 @@ from sklearn import datasets
 from sklearn import preprocessing
 from Query_ERCOT_DB import Query_ERCOT_DB
 from Data_Scaler import Data_Scaler
+import scipy.signal
+import math
 
 MONTHS_PER_YEAR = 12
 DAYS_PER_MONTH = 28
@@ -49,8 +50,6 @@ class Feature_Processor(Query_ERCOT_DB):
         self.data_scaler = None
         self.numerical_features = None
         self.lzhub = None
-        self.modelB_features = ['P(h-24)', 'P(h-25)', 'P(h-47)', 'P(h-48)', 'P(h-72)', 'P(h-120)', 'P(h-144)', 'P(h-167)', 'P(h-168)']
-        self.modelC_features = ['FLoad', 'P(h-24)', 'P(h-168)', 'L(h-24)', 'L(h-168)']
         self.table_headers = []
         Query_ERCOT_DB.c.execute("""SHOW COLUMNS FROM DAM_SPPs""")
         r = list(Query_ERCOT_DB.c.fetchall())
@@ -94,7 +93,7 @@ class Feature_Processor(Query_ERCOT_DB):
         Input5: Hourly price of day d-7
     Model B (exogenous variables):
     '''
-    def construct_feature_vector_matrix(self, lzhub, model_type):
+    def construct_feature_vector_matrix(self, lzhub, model_type='A'):
         self.lzhub = lzhub + '_SPP'
         dflzhub = self.df[lzhub + '_SPP']
         features = []
@@ -172,20 +171,27 @@ class Feature_Processor(Query_ERCOT_DB):
         20% of each month for validation
         20% of each month for testing
     '''
-    def train_test_validate(self, scaling = 'standard', train_size=0.6, test_size=0.2):
+    def train_test_validate(self, method='sequential', scaling = 'standard', train_size=0.6, test_size=0.2):
         self.data_scaler = Data_Scaler(scaling)
         ft = self.features_df
         train_indices = []
         test_indices = []
         val_indices = []
-        for i in range(MONTHS_PER_YEAR):
-            train_i, test_i, val_i = sample_month(i, train_size, test_size, self.features_df.shape[0])
-            train_indices = train_indices + train_i
-            test_indices = test_indices + test_i
-            val_indices = val_indices + val_i
-        # train_indices = [i*HRS_PER_DAY for i in train_indices]
-        # test_indices = [i*HRS_PER_DAY for i in test_indices]
-        # val_indices = [i*HRS_PER_DAY for i in val_indices]
+        if method == 'by_month':
+            for i in range(MONTHS_PER_YEAR):
+                train_i, test_i, val_i = sample_month(i, train_size, test_size, self.features_df.shape[0])
+                train_indices = train_indices + train_i
+                test_indices = test_indices + test_i
+                val_indices = val_indices + val_i
+        elif method == 'sequential':
+            np.random.seed(22943)
+            total_num_samples = self.features_df.as_matrix().shape[0]
+            train_boundary = int(total_num_samples*train_size)
+            val_boundary = int(total_num_samples*(train_size + test_size))
+            # train_indices = np.random.choice(train_boundary, int(0.8*train_boundary), replace=False)
+            train_indices = np.arange(0, train_boundary)
+            val_indices = np.arange(train_boundary, val_boundary)
+            test_indices = np.arange(val_boundary, total_num_samples)
         train_dfs = []
         test_dfs = []
         val_dfs = []
@@ -202,6 +208,7 @@ class Feature_Processor(Query_ERCOT_DB):
         self.test_df = self.data_scaler.scale_testing_data(self.test_df, self.numerical_features)
         self.val_df = self.data_scaler.scale_testing_data(self.val_df, self.numerical_features)
         return self.train_df, self.val_df, self.test_df
+
 
     def convert_dfs_to_numpy(self,df):
         num_features = df.as_matrix().shape[1]
@@ -279,10 +286,40 @@ def sample_month(month_index, train_size, test_size, sample_size):
         val_i += [shifted_index]
     return train_i, test_i, val_i
 
+def autocorr(x):
+    result = np.correlate(x, x, mode='full')
+    return result[result.size/2:]
+
+
 
 
 if __name__ == '__main__':
     fp = Feature_Processor()
     fp.query('2011-01-01', '2015-12-31')
-    fp.construct_feature_vector_matrix('LZ_NORTH', 'Correlation_Testing')
-    fp.compute_Pearson_correlation()
+    S = fp.df['LZ_WEST_SPP'].as_matrix()
+    autocorr_S = autocorr(S)
+    plt.plot(autocorr_S[0:200])
+    plt.show()
+    # MA_length = 10.0
+    # b = [1.0/MA_length for i in range(int(MA_length))]
+    # a = [1]
+    # Sk = scipy.signal.lfilter(b, a, S)
+    # w = 48
+    # R = np.zeros(len(S))
+    # for i, val in enumerate(S):
+    #     ceil = math.ceil(i/w)
+    #     num_idx = (math.ceil(i/w)*(i-1))%w
+    #     den_idx = math.ceil(i/w)
+    #     # print(S[num_idx])
+    #     # print(Sk[den_idx])
+    #     R[i] = S[num_idx]/Sk[den_idx]
+    # R = R[MA_length-w:]
+    # plt.plot(fft)
+    # plt.plot(filtered_fft)
+    # plt.plot(S)
+    # plt.plot(Sk)
+    # plt.show()
+    # fp.construct_feature_vector_matrix('LZ_NORTH', 'A')
+    # fp.train_test_validate()
+    # print(fp.train_df)
+    # # fp.compute_Pearson_correlation()

@@ -19,7 +19,7 @@ class Sequence_Feature_Processor(Feature_Processor):
         self.val_targets = []
         super(Sequence_Feature_Processor, self).__init__()
 
-    def construct_feature_vector_matrix(self, lzhub, model_type):
+    def construct_feature_vector_matrix(self, lzhub):
         self.targets = []
         self.sequences =[]
         self.lzhub = lzhub + '_SPP'
@@ -38,15 +38,15 @@ class Sequence_Feature_Processor(Feature_Processor):
                 self.targets.append(self.features_df.iloc[pred_hour_index]['Price'])
                 sequence = []
                 sequence.append(self.features_df.iloc[pred_hour_index - 24])
-                sequence.append(self.features_df.iloc[pred_hour_index - 25])
+                sequence.append(self.features_df.iloc[pred_hour_index - 48])
                 sequence.append(self.features_df.iloc[pred_hour_index - 72])
                 sequence.append(self.features_df.iloc[pred_hour_index - 96])
-                # sequence = [self.features_df.iloc[pred_hour_index - 24*i] for i in np.arange(1, 8)]
+                # sequence = [self.features_df.iloc[pred_hour_index - i] for i in np.arange(24, 96)]
                 self.sequences.append(sequence)
         self.targets = np.array(self.targets)
         self.sequences = np.array(self.sequences)
 
-    def train_test_validate(self, scaling='standard', train_size=0.6, test_size=0.2):
+    def train_test_validate(self, method='sequential', scaling='standard', train_size=0.6, test_size=0.2):
         self.train_features = []
         self.test_features = []
         self.val_features = []
@@ -58,34 +58,34 @@ class Sequence_Feature_Processor(Feature_Processor):
         val_indices = []
         sequences = self.sequences
         targets = self.targets
-
-        for i in range(MONTHS_PER_YEAR):
-            train_i, test_i, val_i = sample_month(i, train_size, test_size, sequences.shape[0])
-            train_indices = train_indices + train_i
-            test_indices = test_indices + test_i
-            val_indices = val_indices + val_i
-        # train_indices = [i*HRS_PER_DAY for i in train_indices]
-        # test_indices = [i*HRS_PER_DAY for i in test_indices]
-        # val_indices = [i*HRS_PER_DAY for i in val_indices]
+        if method == 'by_month':
+            for i in range(MONTHS_PER_YEAR):
+                train_i, test_i, val_i = sample_month(i, train_size, test_size, sequences.shape[0])
+                train_indices = train_indices + train_i
+                test_indices = test_indices + test_i
+                val_indices = val_indices + val_i
+        elif method == 'sequential':
+            np.random.seed(22943)
+            total_num_samples = sequences.shape[0]
+            train_boundary = int(total_num_samples*train_size)
+            val_boundary = int(total_num_samples*(train_size + test_size))
+            train_indices = np.arange(0, train_boundary)
+            # train_indices = np.random.choice(train_boundary, int(0.8*train_boundary), replace=False)
+            val_indices = np.arange(train_boundary, val_boundary)
+            test_indices = np.arange(val_boundary, total_num_samples)
         for i in train_indices:
             self.train_features.append(sequences[i, :, :])
             self.train_targets.append(targets[i])
         self.train_features = np.array(self.train_features)
         self.train_targets = np.array(self.train_targets)
-        # self.train_features = np.concatenate(self.train_features, axis=0)
-        # self.train_targets = np.concatenate(self.train_targets, axis=0)
         for i in test_indices:
             self.test_features.append(sequences[i, :, :])
             self.test_targets.append(targets[i])
-        # self.test_features = np.concatenate(self.test_features, axis=0)
-        # self.test_targets = np.concatenate(self.test_targets, axis=0)
         self.test_features = np.array(self.test_features)
         self.test_targets = np.array(self.test_targets)
         for i in val_indices:
             self.val_features.append(sequences[i, :, :])
             self.val_targets.append(targets[i])
-        # self.val_features = np.concatenate(self.val_features, axis=0)
-        # self.val_targets = np.concatenate(self.val_targets, axis=0)
         self.val_features = np.array(self.val_features)
         self.val_targets = np.array(self.val_targets)
 
@@ -104,10 +104,10 @@ class Sequence_Feature_Processor(Feature_Processor):
 
 if __name__ == '__main__':
     sfp  = Sequence_Feature_Processor()
-    sfp.query('2015-01-01', '2015-12-31')
+    sfp.query('2012-01-01', '2012-12-31')
     sfp.construct_feature_vector_matrix('LZ_WEST', 'LSTM')
     sfp.train_test_validate()
     # print(sfp.sequences)
     # print(sfp.targets)
-    print(sfp.train_features)
-    print(sfp.train_targets)
+    print(sfp.train_features.shape)
+    print(sfp.test_features.shape)

@@ -4,7 +4,6 @@
 import sys
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from keras.models import Sequential
 from keras.layers import Dense, LSTM, SimpleRNN
 sys.path.insert(0, '/home/kenlee/energy_market_project/scripts/MySQL_scripts/')
@@ -39,15 +38,15 @@ class Keras_NN(object):
     def query_db(self, start_date, end_date):
         self.feature_processor.query(start_date, end_date)
 
-    def load_data(self, lzhub, model_type, scaling_method='standard'):
-        self.feature_df = self.feature_processor.construct_feature_vector_matrix(lzhub, model_type)
+    def load_data(self, lzhub, scaling_method='standard'):
+        self.feature_df = self.feature_processor.construct_feature_vector_matrix(lzhub)
         if self.type == 'MLP':
             self.train_df, self.val_df, self.test_df = self.feature_processor.train_test_validate(scaling=scaling_method)
             self.x_train, self.y_train = self.feature_processor.convert_dfs_to_numpy(self.train_df)
             self.x_test, self.y_test = self.feature_processor.convert_dfs_to_numpy(self.test_df)
             self.x_val, self.y_val = self.feature_processor.convert_dfs_to_numpy(self.val_df)
         if self.type != 'MLP':
-            self.x_train, self.y_train, self.x_test, self.y_test, self.x_val, self.y_val = self.feature_processor.train_test_validate()
+            self.x_train, self.y_train, self.x_test, self.y_test, self.x_val, self.y_val = self.feature_processor.train_test_validate(scaling=scaling_method)
 
 
     def create_model(self, hidden_layers, type='MLP'):
@@ -55,7 +54,7 @@ class Keras_NN(object):
             self.model = Sequential()
             self.model.add(Dense(hidden_layers, init = 'glorot_uniform', activation = 'tanh', input_dim = self.x_train.shape[1]))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
-            self.model.compile(loss='mean_squared_error', optimizer='sgd', metrics = ['accuracy'])
+            self.model.compile(loss='mean_squared_error', optimizer='sgd')
         if type == 'SimpleRNN':
             self.model = Sequential()
             self.model.add(SimpleRNN(hidden_layers, input_dim = self.x_train.shape[2], input_length = self.x_train.shape[1]))
@@ -76,7 +75,8 @@ class Keras_NN(object):
 
 
     def train_model(self, epochs):
-        self.model.fit(self.x_train, self.y_train, validation_data=(self.x_val, self.y_val), nb_epoch=epochs)
+        hist = self.model.fit(self.x_train, self.y_train, batch_size=250, validation_data=(self.x_val, self.y_val), nb_epoch=epochs)
+        return hist
 
     def predict(self):
         if self.type == 'MLP':
@@ -105,10 +105,12 @@ class Keras_NN(object):
 
 if __name__ == '__main__':
     kMLP = Keras_NN(type='LSTM')
-    kMLP.query_db('2012-01-01', '2012-12-31')
-    kMLP.load_data('LZ_WEST', 'A')
-    kMLP.create_model(hidden_layers=30, type = 'LSTM')
-    kMLP.train_model(epochs=50)
+    kMLP.query_db('2011-01-01', '2012-12-31')
+    kMLP.load_data('LZ_WEST')
+    kMLP.create_model(hidden_layers=30, type='LSTM')
+    hist = kMLP.train_model(epochs=10)
+    val_loss = hist.history['val_loss']
+    print(val_loss.index(min(val_loss)))
     kMLP.predict()
     kMLP.compute_metrics()
     print(kMLP.MAPE)
