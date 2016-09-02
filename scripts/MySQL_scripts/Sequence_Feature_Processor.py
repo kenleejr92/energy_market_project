@@ -22,8 +22,8 @@ class Sequence_Feature_Processor(Feature_Processor):
     def construct_feature_vector_matrix(self, lzhub):
         self.targets = []
         self.sequences =[]
-        self.lzhub = lzhub + '_SPP'
-        dflzhub = self.df[lzhub + '_SPP']
+        self.lzhub = lzhub
+        dflzhub = self.df[lzhub]
         features = []
         for dt, price in dflzhub.iteritems():
             features.append([price, work_day_or_holiday(dt), dt.hour, dt.weekday(), dt.month])

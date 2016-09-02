@@ -104,11 +104,11 @@ class Keras_NN(object):
         plt.show()
 
 if __name__ == '__main__':
-    kMLP = Keras_NN(type='LSTM')
-    kMLP.query_db('2011-01-01', '2012-12-31')
+    kMLP = Keras_NN(type='MLP')
+    kMLP.query_db('2011-01-01', '2015-12-31')
     kMLP.load_data('LZ_WEST')
-    kMLP.create_model(hidden_layers=30, type='LSTM')
-    hist = kMLP.train_model(epochs=10)
+    kMLP.create_model(hidden_layers=30, type='MLP')
+    hist = kMLP.train_model(epochs=100)
     val_loss = hist.history['val_loss']
     print(val_loss.index(min(val_loss)))
     kMLP.predict()

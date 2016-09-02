@@ -12,6 +12,16 @@ raw_LMP = sc.textFile("/ssd/raw_ercot_data/dam_lmps/DAM_by_LZHBSPP/2010-2016_DAM
 header = raw_LMP.first()
 raw_LMP = raw_LMP.filter(lambda x: x!=header)
 
+# # Get all bus names
+# def get_bus_names(line):
+#     temp = line.split(",")
+#     return (temp[2],1)
+# buses = raw_LMP.map(get_bus_names)
+# buses = buses.reduceByKey(lambda x,y: x + y).keys()
+# bus_list = list(buses.collect())
+# #broadcast the list of buses to all worker nodes
+# bus_list = sc.broadcast(bus_list)
+
 #create (datetime, (bus_name,price)) pair
 def create_pairs(line):
     temp = line.split(",")

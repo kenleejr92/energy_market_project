@@ -9,6 +9,16 @@ raw_LMP = sc.textFile("s3://lmpdata/2011_LMPs/2011_LMPs.csv")
 header = raw_LMP.first()
 raw_LMP = raw_LMP.filter(lambda x: x!=header)
 
+# # Get all bus names
+# def get_bus_names(line):
+#     temp = line.split(",")
+#     return (temp[2],1)
+# buses = raw_LMP.map(get_bus_names)
+# buses = buses.reduceByKey(lambda x,y: x + y).keys()
+# bus_list = list(buses.collect())
+# #broadcast the list of buses to all worker nodes
+# bus_list = sc.broadcast(bus_list)
+
 #create (datetime, (bus_name,price)) pair
 def create_pairs(line):
     temp = line.split(",")
@@ -16,7 +26,6 @@ def create_pairs(line):
 pairs = raw_LMP.map(create_pairs)
 
 #reduce by datetime key
-#pairs.partitionBy(2190,rangePartitioner)
 reduced_by_date = pairs.reduceByKey(lambda x,y: x + y)
 
 #sort by bus_name for each date

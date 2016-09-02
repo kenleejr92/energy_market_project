@@ -1,53 +1,54 @@
 
 # coding: utf-8
 
-# In[20]:
 
 import MySQLdb
 import os
 import sys
+import json
 from MySQLdb.constants import FIELD_TYPE
 
 my_conv = { FIELD_TYPE.DECIMAL: float }
 db=MySQLdb.connect(host="localhost",db="ercot_data",read_default_file="/etc/mysql/my.cnf",conv=my_conv)
 c=db.cursor()
-
-
-# In[21]:
-
-c.execute("""DROP TABLE IF EXISTS DAM_SPPs""")
-c.execute("""CREATE TABLE DAM_SPPs (
-            delivery_date DATE,
-            hour_ending TIME,
-            PRIMARY KEY (delivery_date,hour_ending)
-            ) engine = MyISAM""")
-
-
-# In[22]:
-
-f = open("/ssd/raw_ercot_data/dam_lmps/DAM_by_LZHBSPP/zones/part-00000","r")
-bus_names = [line[:-1] for line in f]
+f = open("/ssd/raw_ercot_data/dam_lmps/aggregated_LMPs/table_columns/columns.json", "r")
+table_dict = json.load(f)
 f.close()
-bus_names
+f = open('create_table_queries.sql', 'w+')
+print(table_dict.keys())
+for table, columns in table_dict.iteritems():
+    c.execute("""DROP TABLE IF EXISTS DAM_LMP%s""" % table[5:])
+    c.execute("""CREATE TABLE DAM_LMP%s (
+                delivery_date DATE,
+                hour_ending TIME,
+                PRIMARY KEY (delivery_date,hour_ending)
+                ) engine = MyISAM""" % table[5:])
+
+    for i,bus in enumerate(columns):
+        if bus[0] in ['0','1','2','3','4','5','6','7','8','9'] or bus == 'LOAD':
+            columns[i] = 'n' + columns[i]
+        c.execute("""ALTER TABLE DAM_LMP%s ADD COLUMN %s DECIMAL(6,2)""" % (table[5:], columns[i]))
 
 
-# In[23]:
+    beginning = '@date_variable,hour_ending'
+    bus_vars = ''
+    for bus in columns:
+        bus_vars = bus_vars + ',' + '@' + bus
+    column_names = beginning + bus_vars
+    column_names = '(' + column_names + ')'
+    null_commands = []
+    for bus_var in bus_vars.split(','):
+        if bus_var == '': continue
+        null_commands.append(' %s = nullif(%s,\'null\')' % (bus_var[1:], bus_var))
+    skeleton_query = """LOAD DATA LOCAL INFILE '/ssd/raw_ercot_data/dam_lmps/aggregated_LMPs/LMP_table%s/table.csv' INTO TABLE DAM_LMP%s FIELDS TERMINATED BY ',' LINES TERMINATED BY '\\n' %s SET delivery_date = STR_TO_DATE(@date_variable, '%%m/%%d/%%Y'),""" % (table[5:], table[5:], column_names)
+    for nc in null_commands:
+        skeleton_query = skeleton_query + nc + ','
+    skeleton_query = skeleton_query[:-1] + ';'
+    f.write(skeleton_query + '\n')
+f.close()
 
-for bus in bus_names:
-    c.execute("""ALTER TABLE DAM_SPPs ADD COLUMN `%s_SPP` DECIMAL(6,2)""" % bus)
 
 
-# In[25]:
-
-c.execute("""LOAD DATA LOCAL INFILE '/ssd/raw_ercot_data/dam_lmps/DAM_by_LZHBSPP/spark_results/part-00000' 
-INTO TABLE DAM_SPPs FIELDS TERMINATED BY ',' 
-LINES TERMINATED BY '\n' 
-(@date_variable,hour_ending,HB_BUSAVG_SPP,HB_HOUSTON_SPP,HB_HUBAVG_SPP,HB_NORTH_SPP,HB_SOUTH_SPP,HB_WEST_SPP,LZ_AEN_SPP,LZ_CPS_SPP,LZ_HOUSTON_SPP,LZ_LCRA_SPP,LZ_NORTH_SPP,LZ_RAYBN_SPP,LZ_SOUTH_SPP,LZ_WEST_SPP)
-SET delivery_date = STR_TO_DATE(@date_variable, '%m/%d/%Y');
-""")
-
-
-# In[ ]:
 
 
 

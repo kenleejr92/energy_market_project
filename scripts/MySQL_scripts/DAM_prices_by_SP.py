@@ -94,8 +94,8 @@ class Feature_Processor(Query_ERCOT_DB):
     Model B (exogenous variables):
     '''
     def construct_feature_vector_matrix(self, lzhub, model_type='A'):
-        self.lzhub = lzhub + '_SPP'
-        dflzhub = self.df[lzhub + '_SPP']
+        self.lzhub = lzhub
+        dflzhub = self.df[lzhub]
         features = []
         feature_labels = None
         idx_wout_1st_week = None
@@ -113,7 +113,7 @@ class Feature_Processor(Query_ERCOT_DB):
                                           dflzhub.iloc[pred_hour_index - 72],
                                           dflzhub.iloc[pred_hour_index - 96]])
             feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'P(h-24)', 'P(h-25)', 'P(h-72)', 'P(h-96)']
-            self.numerical_features = ['P(h-24)', 'P(h-25)', 'P(h-72)', 'P(h-96)'] + [lzhub + '_SPP']
+            self.numerical_features = ['P(h-24)', 'P(h-25)', 'P(h-72)', 'P(h-96)'] + [lzhub]
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
 
 
@@ -123,7 +123,7 @@ class Feature_Processor(Query_ERCOT_DB):
                 if pred_hour_index - 7*24 >= 0:
                     features.append([dflzhub.iloc[pred_hour_index - i] for i in range(24, 169)])
             feature_labels = ['P(h-%s)' % i for i in range(24, 169)]
-            self.numerical_features = ['P(h-%s)' % i for i in range(24, 169)] + [lzhub + '_SPP']
+            self.numerical_features = ['P(h-%s)' % i for i in range(24, 169)] + [lzhub]
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
 
         self.features_df = pd.DataFrame(data=features,
