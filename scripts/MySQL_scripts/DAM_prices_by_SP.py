@@ -20,6 +20,7 @@ from sklearn import datasets
 from sklearn import preprocessing
 from Query_ERCOT_DB import Query_ERCOT_DB
 from Data_Scaler import Data_Scaler
+from Query_CRR import Query_CRR
 import scipy.signal
 import math
 
@@ -101,19 +102,19 @@ class Feature_Processor(Query_ERCOT_DB):
         idx_wout_1st_week = None
         
         if model_type == 'A':
-            for dt, price in dflzhub.iteritems():
+            for dt, series in dflzhub.iteritems():
                 pred_hour_index = dflzhub.index.get_loc(dt)
                 if pred_hour_index - 7*24 >= 0:
-                    features.append([work_day_or_holiday(dt),
-                                          dt.hour,
-                                          dt.weekday(),
-                                          dt.month,
-                                          dflzhub.iloc[pred_hour_index - 24],
-                                          dflzhub.iloc[pred_hour_index - 25],
-                                          dflzhub.iloc[pred_hour_index - 72],
-                                          dflzhub.iloc[pred_hour_index - 96]])
-            feature_labels = ['Holiday', 'Hour', 'Day', 'Month', 'P(h-24)', 'P(h-25)', 'P(h-72)', 'P(h-96)']
-            self.numerical_features = ['P(h-24)', 'P(h-25)', 'P(h-72)', 'P(h-96)'] + [lzhub]
+                    categorical_features = np.array([work_day_or_holiday(dt), dt.hour, dt.weekday(), dt.month])
+                    past_spps = np.array([dflzhub.iloc[pred_hour_index-24],
+                                          dflzhub.iloc[pred_hour_index-48],
+                                          dflzhub.iloc[pred_hour_index-72],
+                                          dflzhub.iloc[pred_hour_index-96]])
+                    past_values = np.concatenate([categorical_features,
+                                                 past_spps])
+                    features.append(past_values)
+            feature_labels = ['Holiday', 'Hour', 'Day', 'Month'] + ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)']
+            self.numerical_features = ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)'] + [lzhub]
             idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
 
 
@@ -129,6 +130,7 @@ class Feature_Processor(Query_ERCOT_DB):
         self.features_df = pd.DataFrame(data=features,
                                    index=idx_wout_1st_week,
                                    columns=feature_labels)
+
         if model_type == 'A':
             self.features_df = encode_onehot(self.features_df, 'Day')
             self.features_df = encode_onehot(self.features_df, 'Month')
@@ -171,7 +173,7 @@ class Feature_Processor(Query_ERCOT_DB):
         20% of each month for validation
         20% of each month for testing
     '''
-    def train_test_validate(self, method='sequential', scaling = 'standard', train_size=0.6, test_size=0.2):
+    def train_test_validate(self, method='sequential', scaling ='min_max', train_size=0.6, test_size=0.2):
         self.data_scaler = Data_Scaler(scaling)
         ft = self.features_df
         train_indices = []
@@ -296,10 +298,8 @@ def autocorr(x):
 if __name__ == '__main__':
     fp = Feature_Processor()
     fp.query('2011-01-01', '2015-12-31')
-    S = fp.df['LZ_WEST_SPP'].as_matrix()
-    autocorr_S = autocorr(S)
-    plt.plot(autocorr_S[0:200])
-    plt.show()
+    fp.construct_feature_vector_matrix('LZ_WEST')
+    print(fp.features_df)
     # MA_length = 10.0
     # b = [1.0/MA_length for i in range(int(MA_length))]
     # a = [1]
