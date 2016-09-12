@@ -56,9 +56,18 @@ class Adaptive_Normalizer(Query_ERCOT_DB):
             R[i+1] = self.price_series[math.ceil((i+1)/w)*i % w]/self.MA[math.ceil((i+1)/w)]
         return R
 
+def reject_outliers(data, m):
+    mean = np.mean(data)
+    std = np.std(data)
+    j = 0
+    for i,d in enumerate(data):
+        if abs(d - mean) >= m*std:
+            data[i] = m*std
+    return data
+
 if __name__ == '__main__':
     AN = Adaptive_Normalizer()
-    AN.query('LZ_WEST', '2011-01-01', '2015-12-31')
+    AN.query('LZ_WEST', '2011-01-01', '2012-12-31')
 
     # plt.plot(AN.price_series)
     # plt.plot((AN.moving_average(10)))
@@ -68,14 +77,16 @@ if __name__ == '__main__':
     std = np.std(R)
     train = AN.price_series[0:int(0.6*len(AN.price_series))]
     test = AN.price_series[int(0.6*len(AN.price_series)):]
-    scaler = preprocessing.MinMaxScaler(feature_range=(-1,1))
-    scaler2 = preprocessing.MinMaxScaler(feature_range=(-1,1))
-    x = scaler.fit_transform(train.reshape(-1,1))
-
-    y = scaler.transform(test.reshape(-1,1))
-    y2 = scaler2.fit_transform(test.reshape(-1,1))
-    plt.plot(test)
-    plt.plot(scaler.inverse_transform(y2))
+    scaler = preprocessing.MinMaxScaler(feature_range=(0,1))
+    scaler2 = preprocessing.MinMaxScaler(feature_range=(0,1))
+    scaler3 = preprocessing.StandardScaler()
+    c = np.copy(AN.price_series)
+    x = scaler.fit_transform(c.reshape(-1,1))
+    plt.hist(AN.price_series, bins=1000)
+    # x = reject_outliers(x,4)
+    # y = scaler2.fit_transform(AN.price_series.reshape(-1,1))
+    # z = scaler3.fit_transform(c.reshape(-1,1))
+    # plt.plot(y)
     # plt.plot(x)
-    # plt.plot(AN.price_series)
+    # plt.plot(z)
     plt.show()

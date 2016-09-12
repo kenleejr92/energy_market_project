@@ -17,9 +17,12 @@ import holidays
 import random
 from sklearn import cross_validation
 from sklearn import datasets
+from sklearn.preprocessing import Imputer
 from sklearn import preprocessing
 from Query_ERCOT_DB import Query_ERCOT_DB
 from Data_Scaler import Data_Scaler
+from Exogeneous_Variables import Exogeneous_Variables
+
 from Query_CRR import Query_CRR
 import scipy.signal
 import math
@@ -51,6 +54,8 @@ class Feature_Processor(Query_ERCOT_DB):
         self.data_scaler = None
         self.numerical_features = None
         self.lzhub = None
+        self.wind_df = None
+        self.load_df = None
         self.table_headers = []
         Query_ERCOT_DB.c.execute("""SHOW COLUMNS FROM DAM_SPPs""")
         r = list(Query_ERCOT_DB.c.fetchall())
@@ -94,9 +99,19 @@ class Feature_Processor(Query_ERCOT_DB):
         Input5: Hourly price of day d-7
     Model B (exogenous variables):
     '''
-    def construct_feature_vector_matrix(self, lzhub, model_type='A'):
+    def construct_feature_vector_matrix(self, lzhub, model_type='B'):
         self.lzhub = lzhub
-        dflzhub = self.df[lzhub]
+        prices = self.df[[lzhub]]
+        zone = 'WGRPP_' + lzhub[3:]
+        EV = Exogeneous_Variables()
+        self.wind_df = EV.query_wind(self.start_date, self.end_date)[[zone]]
+        self.load_df = EV.query_load(self.start_date, self.end_date)[['SystemTotal']]
+        price_wind_load_df = prices.join(self.wind_df, how='inner').join(self.load_df, how='inner')
+        imp = Imputer(missing_values='NaN', strategy='mean', axis=0)
+        price_wind_load_df[['SystemTotal', zone]] = imp.fit_transform(price_wind_load_df[['SystemTotal', zone]])
+        dflzhub = price_wind_load_df[lzhub]
+        wind = price_wind_load_df[zone]
+        load = price_wind_load_df['SystemTotal']
         features = []
         feature_labels = None
         idx_wout_1st_week = None
@@ -104,7 +119,35 @@ class Feature_Processor(Query_ERCOT_DB):
         if model_type == 'A':
             for dt, series in dflzhub.iteritems():
                 pred_hour_index = dflzhub.index.get_loc(dt)
-                if pred_hour_index - 7*24 >= 0:
+                if type(pred_hour_index) == slice: continue
+                if pred_hour_index - 96 >= 0:
+                    categorical_features = np.array([work_day_or_holiday(dt), dt.hour, dt.weekday(), dt.month])
+                    past_spps = np.array([dflzhub.iloc[pred_hour_index-24],
+                                          dflzhub.iloc[pred_hour_index-48],
+                                          dflzhub.iloc[pred_hour_index-72],
+                                          dflzhub.iloc[pred_hour_index-96]])
+                    past_wind = np.array([wind.iloc[pred_hour_index]])
+                    past_load = np.array([load.iloc[pred_hour_index]])
+                    past_values = np.concatenate([categorical_features,
+                                                 past_spps, past_wind, past_load])
+                    features.append(past_values)
+
+            feature_labels = ['Holiday', 'Hour', 'Day', 'Month'] + \
+                             ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)'] + \
+                             ['W(h)'] + \
+                             ['L(h)']
+
+            self.numerical_features = ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)'] + \
+                                      ['W(h)'] + \
+                                      ['L(h)'] + \
+                                      [lzhub]
+            idx_wout_1st_week = list(dflzhub.index.values)[96:]
+
+        if model_type == 'B':
+            for dt, series in dflzhub.iteritems():
+                pred_hour_index = dflzhub.index.get_loc(dt)
+                if type(pred_hour_index) == slice: continue
+                if pred_hour_index - 96 >= 0:
                     categorical_features = np.array([work_day_or_holiday(dt), dt.hour, dt.weekday(), dt.month])
                     past_spps = np.array([dflzhub.iloc[pred_hour_index-24],
                                           dflzhub.iloc[pred_hour_index-48],
@@ -113,9 +156,15 @@ class Feature_Processor(Query_ERCOT_DB):
                     past_values = np.concatenate([categorical_features,
                                                  past_spps])
                     features.append(past_values)
-            feature_labels = ['Holiday', 'Hour', 'Day', 'Month'] + ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)']
-            self.numerical_features = ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)'] + [lzhub]
-            idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
+
+            feature_labels = ['Holiday', 'Hour', 'Day', 'Month'] + \
+                             ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)']
+
+
+            self.numerical_features = ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)'] + \
+                                      [lzhub]
+            # added 18 to 96 for coding error?
+            idx_wout_1st_week = list(dflzhub.index.values)[96:]
 
 
         if model_type == 'Correlation_Testing':
@@ -173,7 +222,7 @@ class Feature_Processor(Query_ERCOT_DB):
         20% of each month for validation
         20% of each month for testing
     '''
-    def train_test_validate(self, method='sequential', scaling ='min_max', train_size=0.6, test_size=0.2):
+    def train_test_validate(self, scaling, method='sequential', train_size=0.6, test_size=0.2):
         self.data_scaler = Data_Scaler(scaling)
         ft = self.features_df
         train_indices = []
