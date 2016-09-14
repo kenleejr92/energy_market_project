@@ -11,7 +11,7 @@ class Data_Scaler(object):
         if method == 'normalize':
             self.scaler = preprocessing.Normalizer()
         if method == 'min_max':
-            self.scaler = preprocessing.MinMaxScaler(feature_range=(-1,1))
+            self.scaler = preprocessing.MinMaxScaler(feature_range=(-1, 1))
         if method == 'max_abs':
             self.scaler = preprocessing.MaxAbsScaler()
         if method == 'robust':

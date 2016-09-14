@@ -22,6 +22,7 @@ from sklearn import preprocessing
 from Query_ERCOT_DB import Query_ERCOT_DB
 from Data_Scaler import Data_Scaler
 from Exogeneous_Variables import Exogeneous_Variables
+import os
 
 from Query_CRR import Query_CRR
 import scipy.signal
@@ -115,8 +116,31 @@ class Feature_Processor(Query_ERCOT_DB):
         features = []
         feature_labels = None
         idx_wout_1st_week = None
-        
+
         if model_type == 'A':
+            for dt, series in dflzhub.iteritems():
+                pred_hour_index = dflzhub.index.get_loc(dt)
+                if type(pred_hour_index) == slice: continue
+                if pred_hour_index - 96 >= 0:
+                    categorical_features = np.array([work_day_or_holiday(dt), dt.hour, dt.weekday(), dt.month])
+                    past_spps = np.array([dflzhub.iloc[pred_hour_index-24],
+                                          dflzhub.iloc[pred_hour_index-48],
+                                          dflzhub.iloc[pred_hour_index-72],
+                                          dflzhub.iloc[pred_hour_index-96]])
+                    past_values = np.concatenate([categorical_features,
+                                                 past_spps])
+                    features.append(past_values)
+
+            feature_labels = ['Holiday', 'Hour', 'Day', 'Month'] + \
+                             ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)']
+
+
+            self.numerical_features = ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)'] + \
+                                      [lzhub]
+            # added 18 to 96 for coding error?
+            idx_wout_1st_week = list(dflzhub.index.values)[96:]
+
+        if model_type == 'B':
             for dt, series in dflzhub.iteritems():
                 pred_hour_index = dflzhub.index.get_loc(dt)
                 if type(pred_hour_index) == slice: continue
@@ -143,47 +167,14 @@ class Feature_Processor(Query_ERCOT_DB):
                                       [lzhub]
             idx_wout_1st_week = list(dflzhub.index.values)[96:]
 
-        if model_type == 'B':
-            for dt, series in dflzhub.iteritems():
-                pred_hour_index = dflzhub.index.get_loc(dt)
-                if type(pred_hour_index) == slice: continue
-                if pred_hour_index - 96 >= 0:
-                    categorical_features = np.array([work_day_or_holiday(dt), dt.hour, dt.weekday(), dt.month])
-                    past_spps = np.array([dflzhub.iloc[pred_hour_index-24],
-                                          dflzhub.iloc[pred_hour_index-48],
-                                          dflzhub.iloc[pred_hour_index-72],
-                                          dflzhub.iloc[pred_hour_index-96]])
-                    past_values = np.concatenate([categorical_features,
-                                                 past_spps])
-                    features.append(past_values)
-
-            feature_labels = ['Holiday', 'Hour', 'Day', 'Month'] + \
-                             ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)']
-
-
-            self.numerical_features = ['P(h-24)', 'P(h-48)', 'P(h-72)', 'P(h-96)'] + \
-                                      [lzhub]
-            # added 18 to 96 for coding error?
-            idx_wout_1st_week = list(dflzhub.index.values)[96:]
-
-
-        if model_type == 'Correlation_Testing':
-            for dt, price in dflzhub.iteritems():
-                pred_hour_index = dflzhub.index.get_loc(dt)
-                if pred_hour_index - 7*24 >= 0:
-                    features.append([dflzhub.iloc[pred_hour_index - i] for i in range(24, 169)])
-            feature_labels = ['P(h-%s)' % i for i in range(24, 169)]
-            self.numerical_features = ['P(h-%s)' % i for i in range(24, 169)] + [lzhub]
-            idx_wout_1st_week = list(dflzhub.index.values)[7*24:]
-
         self.features_df = pd.DataFrame(data=features,
                                    index=idx_wout_1st_week,
                                    columns=feature_labels)
 
-        if model_type == 'A':
-            self.features_df = encode_onehot(self.features_df, 'Day')
-            self.features_df = encode_onehot(self.features_df, 'Month')
-            self.features_df = encode_onehot(self.features_df, 'Hour')
+
+        self.features_df = encode_onehot(self.features_df, 'Day')
+        self.features_df = encode_onehot(self.features_df, 'Month')
+        self.features_df = encode_onehot(self.features_df, 'Hour')
         self.features_df = self.features_df.join(dflzhub, how='left')
 
         return self.features_df
@@ -345,30 +336,29 @@ def autocorr(x):
 
 
 if __name__ == '__main__':
+    START_DATE = '2012-07-01'
+    LOAD_ZONES = ['LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST', 'LZ_HOUSTON']
+    END_DATES = ['2013-12-31', '2014-12-31', '2015-12-31']
     fp = Feature_Processor()
-    fp.query('2011-01-01', '2015-12-31')
-    fp.construct_feature_vector_matrix('LZ_WEST')
-    print(fp.features_df)
-    # MA_length = 10.0
-    # b = [1.0/MA_length for i in range(int(MA_length))]
-    # a = [1]
-    # Sk = scipy.signal.lfilter(b, a, S)
-    # w = 48
-    # R = np.zeros(len(S))
-    # for i, val in enumerate(S):
-    #     ceil = math.ceil(i/w)
-    #     num_idx = (math.ceil(i/w)*(i-1))%w
-    #     den_idx = math.ceil(i/w)
-    #     # print(S[num_idx])
-    #     # print(Sk[den_idx])
-    #     R[i] = S[num_idx]/Sk[den_idx]
-    # R = R[MA_length-w:]
-    # plt.plot(fft)
-    # plt.plot(filtered_fft)
-    # plt.plot(S)
-    # plt.plot(Sk)
-    # plt.show()
-    # fp.construct_feature_vector_matrix('LZ_NORTH', 'A')
-    # fp.train_test_validate()
-    # print(fp.train_df)
-    # # fp.compute_Pearson_correlation()
+    for lz in LOAD_ZONES:
+        for ed in END_DATES:
+            print(lz + ed)
+            os.chdir('../normalized_datasets')
+            f1 = open('%s_%s_seq_train_features.pkl' % (ed, lz), 'w+')
+            f2 = open('%s_%s_seq_test_features.pkl' % (ed, lz), 'w+')
+            f3 = open('%s_%s_seq_val_features.pkl' % (ed, lz), 'w+')
+            f4 = open('%s_%s_seq_train_targets.pkl' % (ed, lz), 'w+')
+            f5 = open('%s_%s_seq_test_targets.pkl' % (ed, lz), 'w+')
+            f6 = open('%s_%s_seq_val_targets.pkl' % (ed, lz), 'w+')
+            f7 = open('%s_%s_seq_scaler.pkl' % (ed, lz), 'w+')
+            sfp.query(START_DATE, ed)
+            sfp.construct_feature_vector_matrix(lz)
+            train_features, train_targets, test_features, test_targets, val_features, val_targets = sfp.train_test_validate()
+            pickle.dump(train_features, f1)
+            pickle.dump(test_features, f2)
+            pickle.dump(val_features, f3)
+            pickle.dump(train_targets, f4)
+            pickle.dump(test_targets, f5)
+            pickle.dump(val_targets, f6)
+            pickle.dump(sfp.sequence_scaler, f7)
+

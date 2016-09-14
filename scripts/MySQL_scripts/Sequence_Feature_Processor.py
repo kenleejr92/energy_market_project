@@ -4,6 +4,8 @@ from DAM_prices_by_SP import Feature_Processor, sample_month, work_day_or_holida
 import numpy as np
 import pandas as pd
 from Sequence_Scaler import Sequence_Scaler
+import cPickle as pickle
+import os
 
 class Sequence_Feature_Processor(Feature_Processor):
 
@@ -93,6 +95,7 @@ class Sequence_Feature_Processor(Feature_Processor):
         self.train_features, self.train_targets = self.sequence_scaler.scale_training_data(self.train_features, self.train_targets)
         self.test_features, self.test_targets = self.sequence_scaler.scale_testing_data(self.test_features, self.test_targets)
         self.val_features, self.val_targets = self.sequence_scaler.scale_testing_data(self.val_features, self.val_targets)
+
         return self.train_features, self.train_targets, self.test_features, self.test_targets, self.val_features, self.val_targets
 
     def inverse_scale(self, y):
@@ -103,11 +106,29 @@ class Sequence_Feature_Processor(Feature_Processor):
 
 
 if __name__ == '__main__':
-    sfp  = Sequence_Feature_Processor()
-    sfp.query('2012-01-01', '2012-12-31')
-    sfp.construct_feature_vector_matrix('LZ_WEST', 'LSTM')
-    sfp.train_test_validate()
-    # print(sfp.sequences)
-    # print(sfp.targets)
-    print(sfp.train_features.shape)
-    print(sfp.test_features.shape)
+    START_DATE = '2012-07-01'
+    LOAD_ZONES =['LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST', 'LZ_HOUSTON']
+    END_DATES = ['2012-12-31', '2013-12-31', '2014-12-31', '2015-12-31']
+    sfp = Sequence_Feature_Processor()
+    for lz in LOAD_ZONES:
+        for ed in END_DATES:
+            print(lz + ed)
+            os.chdir('../normalized_datasets')
+            f1 = open('%s_%s_seq_train_features.pkl' % (ed, lz), 'w+')
+            f2 = open('%s_%s_seq_test_features.pkl' % (ed, lz), 'w+')
+            f3 = open('%s_%s_seq_val_features.pkl' % (ed, lz), 'w+')
+            f4 = open('%s_%s_seq_train_targets.pkl' % (ed, lz), 'w+')
+            f5 = open('%s_%s_seq_test_targets.pkl' % (ed, lz), 'w+')
+            f6 = open('%s_%s_seq_val_targets.pkl' % (ed, lz), 'w+')
+            f7 = open('%s_%s_seq_scaler.pkl' % (ed, lz), 'w+')
+            sfp.query(START_DATE, ed)
+            sfp.construct_feature_vector_matrix(lz)
+            train_features, train_targets, test_features, test_targets, val_features, val_targets = sfp.train_test_validate()
+            pickle.dump(train_features, f1)
+            pickle.dump(test_features, f2)
+            pickle.dump(val_features, f3)
+            pickle.dump(train_targets, f4)
+            pickle.dump(test_targets, f5)
+            pickle.dump(val_targets, f6)
+            pickle.dump(sfp.sequence_scaler, f7)
+
