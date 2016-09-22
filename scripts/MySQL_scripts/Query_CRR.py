@@ -4,14 +4,30 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
-
+import cPickle as pickle
 from Query_ERCOT_DB import Query_ERCOT_DB
+from matplotlib import pyplot as plt
+from graphviz import Graph
+
 
 class Query_CRR(Query_ERCOT_DB):
 
     def __init__(self):
         self.table_columns = {}
         self.df = None
+        self.graph_viz = Graph('G',
+                               graph_attr=[('overlap', 'prism2000')],
+                               edge_attr=[('color', 'transparent')],
+                               filename='CRR_graph.gv',
+                               engine='sfdp')
+        try:
+            self.adjacency_matrix = pickle.load('CRR_adjacency_matrix.pkl')
+            self.index_dict = pickle.load('index_dictionary.pkl')
+        except:
+            self.adjacency_matrix = None
+            self.index_dict = None
+            self.create_adjacency_matrix()
+
         self.table_boundaries = {'table0':('0001', 'BLUEMD1_8X'),
                                  'table1':('BLUEMD1_8Z', 'CHT_M'),
                                  'table2':('CHT_X', 'DUKE_8405'),
@@ -44,12 +60,41 @@ class Query_CRR(Query_ERCOT_DB):
             result = [r[0] for r in Query_ERCOT_DB.c.fetchall()[2:]]
             self.table_columns['table%s' % i] = result
 
+    def create_adjacency_matrix(self):
+        Query_ERCOT_DB.c.execute("""SELECT DISTINCT Source FROM crr_ownership GROUP BY Source ORDER BY Source""")
+        nodes = [r[0] for r in list(Query_ERCOT_DB.c.fetchall())]
+        np.random.shuffle(nodes)
+        self.index_dict = {}
+        i = 0
+        for node in nodes:
+            self.index_dict[node] = i
+            i = i +1
+
+        self.adjacency_matrix = np.zeros((len(nodes), len(nodes)))
+        for node in nodes:
+            Query_ERCOT_DB.c.execute("""SELECT Source FROM crr_ownership WHERE Sink = '%s' GROUP BY Source""" % node)
+            nearest_sources = [r[0] for r in list(Query_ERCOT_DB.c.fetchall())]
+            Query_ERCOT_DB.c.execute("""SELECT Sink FROM crr_ownership WHERE Source = '%s' GROUP BY Sink""" % node)
+            nearest_sinks = [r[0] for r in list(Query_ERCOT_DB.c.fetchall())]
+            nearest_neighbors = set(nearest_sources).union(set(nearest_sinks))
+            for nn in nearest_neighbors:
+                try:
+                    self.adjacency_matrix[self.index_dict[node]][self.index_dict[nn]] = 1
+                    self.adjacency_matrix[self.index_dict[nn]][self.index_dict[node]] = 1
+                except:
+                    print(nn)
+                    continue
+        f = open('CRR_adjacency_matrix.pkl', 'w+')
+        f1 = open('index_dictionary.pkl', 'w+')
+        pickle.dump(self.adjacency_matrix, f)
+        pickle.dump(self.adjacency_matrix, f1)
+
     def query(self, node, start_date, end_date):
         Query_ERCOT_DB.c.execute("""SELECT Source FROM crr_ownership WHERE Sink = '%s' GROUP BY Source""" % node)
         nearest_sources = [r[0] for r in list(Query_ERCOT_DB.c.fetchall())]
         Query_ERCOT_DB.c.execute("""SELECT Sink FROM crr_ownership WHERE Source = '%s' GROUP BY Sink""" % node)
         nearest_sinks = [r[0] for r in list(Query_ERCOT_DB.c.fetchall())]
-        nearest_neighbors = list(set(nearest_sources).union(set(nearest_sinks)))
+        nearest_neighbors = set(nearest_sources).union(set(nearest_sinks))
         for nn in nearest_neighbors:
             for i in range(0,13):
                 nn = append_n(nn)
@@ -86,6 +131,61 @@ class Query_CRR(Query_ERCOT_DB):
                 self.df = self.df.join(df, how='left')
             i = i + 1
 
+    def create_graphviz(self):
+        Query_ERCOT_DB.c.execute("""SELECT DISTINCT Source FROM crr_ownership GROUP BY Source ORDER BY Source""")
+        nodes = [r[0] for r in list(Query_ERCOT_DB.c.fetchall())]
+        np.random.seed(22943)
+        np.random.shuffle(nodes)
+        exclude = ['LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST', 'LZ_HOUSTON', 'HB_BUSAVG', 'HB_HOUSTON', 'HB_HUBAVG',
+                   'HB_NORTH', 'HB_SOUTH', 'HB_WEST', 'LZ_AEN', 'LZ_CPS', 'LZ_LCRA', 'LZ_RAYBN']
+        nodes = list(set(nodes).difference(set(exclude)))
+        for node in nodes:
+            price = self.get_price(node, '2012-12-07', '9:00')
+            print(price)
+            self.graph_viz.node(node, color=self.price_to_color(price), style='filled')
+
+        for node in nodes:
+            Query_ERCOT_DB.c.execute("""SELECT Source FROM crr_ownership WHERE Sink = '%s' GROUP BY Source""" % node)
+            nearest_sources = [r[0] for r in list(Query_ERCOT_DB.c.fetchall())]
+            Query_ERCOT_DB.c.execute("""SELECT Sink FROM crr_ownership WHERE Source = '%s' GROUP BY Sink""" % node)
+            nearest_sinks = [r[0] for r in list(Query_ERCOT_DB.c.fetchall())]
+            nearest_neighbors = set(nearest_sources).union(set(nearest_sinks))
+            nearest_neighbors = list(set(nearest_neighbors).difference(set(exclude)))
+            for nn in nearest_neighbors:
+                try:
+                    self.graph_viz.edge(node, nn)
+                except:
+                    continue
+
+    def get_price(self, node, date, hour_ending):
+        for i in range(0,13):
+            node = append_n(node)
+            if node in self.table_columns['table%s' % i]:
+                Query_ERCOT_DB.c.execute("""SELECT %s FROM DAM_LMP%s WHERE delivery_date = "%s" AND hour_ending = \"%s\"""" % (node, i, date, hour_ending))
+                result = list(Query_ERCOT_DB.c.fetchall())[0][0]
+                return result
+
+    def price_to_color(self, price):
+        color = None
+
+        if price == None:
+            color = 'white'
+        else:
+            price = float(price)
+            if price >= 0 and price <= 25:
+                color = 'purple'
+            if price > 25 and price <= 50:
+                color = 'blue'
+            if price > 50 and price <= 75:
+                color = 'green'
+            if price > 75 and price <= 100:
+                color = 'yellow'
+            if price > 100 and price <=150:
+                color = 'orange'
+            if price > 150:
+                color = 'red'
+        return color
+
     def plot(self):
         self.df.plot()
         plt.title("DAM LMP by for CRR nodes")
@@ -102,5 +202,8 @@ def append_n(name):
 
 if __name__ == '__main__':
     qcrr = Query_CRR()
-    qcrr.query('LZ_WEST','2012-01-01','2012-12-31')
-    print(qcrr.df)
+    qcrr.create_graphviz()
+    qcrr.graph_viz.view()
+    # print(np.count_nonzero(qcrr.adjacency_matrix))
+    # plt.imshow(qcrr.adjacency_matrix, interpolation='nearest')
+    # plt.show()

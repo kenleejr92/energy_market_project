@@ -5,7 +5,7 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 from keras.models import Sequential
-from keras.layers import Dense, LSTM, SimpleRNN
+from keras.layers import Dense, LSTM, SimpleRNN, Convolution1D
 sys.path.insert(0, '/home/kenlee/energy_market_project/scripts/MySQL_scripts/')
 from DAM_prices_by_SP import Feature_Processor
 from Sequence_Feature_Processor import Sequence_Feature_Processor
@@ -77,6 +77,11 @@ class Keras_NN(object):
             self.model.add(Dense(hidden_layers, init = 'glorot_uniform', activation = 'tanh', input_dim = self.x_train.shape[1]))
             self.model.add(Dense(1, init = 'zero', activation = 'linear'))
             self.model.compile(loss='mean_squared_error', optimizer='sgd')
+        if type == 'Convolution':
+            self.model = Sequential()
+            self.model.add(Convolution1D(hidden_layers, init = 'glorot_uniform', activation = 'tanh', input_dim = self.x_train.shape[1]))
+            self.model.add(Dense(1, init = 'zero', activation = 'linear'))
+            self.model.compile(loss='mean_squared_error', optimizer='sgd')
         if type == 'SimpleRNN':
             self.model = Sequential()
             self.model.add(SimpleRNN(hidden_layers, input_dim = self.x_train.shape[2], input_length = self.x_train.shape[1]))
@@ -120,10 +125,10 @@ class Keras_NN(object):
         self.TheilU2 = numerator/(denominatorA)
 
     def plot_results(self):
-        plt.plot(self.y_actual, label='actual')
+        # plt.plot(self.y_actual, label='actual')
         plt.plot(self.y_pred, label='predicted')
         plt.legend()
-        plt.show()
+        # plt.show()
 
     def inverse_scale(self, y):
         dim1 = y.shape[0]
@@ -131,10 +136,10 @@ class Keras_NN(object):
         return self.scaler.inverse_scale(y)
 
 if __name__ == '__main__':
-    kMLP = Keras_NN(type='LSTM')
-    kMLP.query_db('2012-07-01', '2015-12-31')
-    kMLP.load_data('2015-12-31', 'LZ_HOUSTON')
-    kMLP.create_model(hidden_layers=30, type='LSTM')
+    kMLP = Keras_NN(type='MLP')
+    kMLP.query_db('2012-07-01', '2014-12-31')
+    kMLP.load_data('2014-12-31', 'LZ_HOUSTON')
+    kMLP.create_model(hidden_layers=30, type='MLP')
     hist = kMLP.train_model(epochs=100)
     val_loss = hist.history['val_loss']
     print(val_loss.index(min(val_loss)))
@@ -144,6 +149,20 @@ if __name__ == '__main__':
     print(kMLP.TheilU1)
     print(kMLP.TheilU2)
     kMLP.plot_results()
+
+    kLSTM = Keras_NN(type='LSTM')
+    kLSTM.load_data('2014-12-31', 'LZ_HOUSTON')
+    kLSTM.create_model(hidden_layers=30, type='StackedLSTM')
+    hist = kLSTM.train_model(epochs=50)
+    val_loss = hist.history['val_loss']
+    print(val_loss.index(min(val_loss)))
+    kLSTM.predict()
+    kLSTM.compute_metrics()
+    print(kLSTM.MAPE)
+    print(kLSTM.TheilU1)
+    print(kLSTM.TheilU2)
+    kLSTM.plot_results()
+    plt.show()
 
 
 

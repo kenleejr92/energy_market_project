@@ -43,7 +43,9 @@ class Sequence_Feature_Processor(Feature_Processor):
                 sequence.append(self.features_df.iloc[pred_hour_index - 48])
                 sequence.append(self.features_df.iloc[pred_hour_index - 72])
                 sequence.append(self.features_df.iloc[pred_hour_index - 96])
-                # sequence = [self.features_df.iloc[pred_hour_index - i] for i in np.arange(24, 96)]
+                sequence.append(self.features_df.iloc[pred_hour_index - 120])
+                sequence.append(self.features_df.iloc[pred_hour_index - 144])
+                # sequence = [self.features_df.iloc[pred_hour_index - i] for i in np.arange(24, 72)]
                 self.sequences.append(sequence)
         self.targets = np.array(self.targets)
         self.sequences = np.array(self.sequences)
@@ -108,7 +110,7 @@ class Sequence_Feature_Processor(Feature_Processor):
 if __name__ == '__main__':
     START_DATE = '2012-07-01'
     LOAD_ZONES =['LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST', 'LZ_HOUSTON']
-    END_DATES = ['2012-12-31', '2013-12-31', '2014-12-31', '2015-12-31']
+    END_DATES = ['2013-12-31', '2014-12-31', '2015-12-31']
     sfp = Sequence_Feature_Processor()
     for lz in LOAD_ZONES:
         for ed in END_DATES:

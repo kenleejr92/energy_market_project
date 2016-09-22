@@ -23,6 +23,7 @@ from Query_ERCOT_DB import Query_ERCOT_DB
 from Data_Scaler import Data_Scaler
 from Exogeneous_Variables import Exogeneous_Variables
 import os
+import cPickle as pickle
 
 from Query_CRR import Query_CRR
 import scipy.signal
@@ -340,25 +341,29 @@ if __name__ == '__main__':
     LOAD_ZONES = ['LZ_NORTH', 'LZ_SOUTH', 'LZ_WEST', 'LZ_HOUSTON']
     END_DATES = ['2013-12-31', '2014-12-31', '2015-12-31']
     fp = Feature_Processor()
-    for lz in LOAD_ZONES:
-        for ed in END_DATES:
-            print(lz + ed)
-            os.chdir('../normalized_datasets')
-            f1 = open('%s_%s_seq_train_features.pkl' % (ed, lz), 'w+')
-            f2 = open('%s_%s_seq_test_features.pkl' % (ed, lz), 'w+')
-            f3 = open('%s_%s_seq_val_features.pkl' % (ed, lz), 'w+')
-            f4 = open('%s_%s_seq_train_targets.pkl' % (ed, lz), 'w+')
-            f5 = open('%s_%s_seq_test_targets.pkl' % (ed, lz), 'w+')
-            f6 = open('%s_%s_seq_val_targets.pkl' % (ed, lz), 'w+')
-            f7 = open('%s_%s_seq_scaler.pkl' % (ed, lz), 'w+')
-            sfp.query(START_DATE, ed)
-            sfp.construct_feature_vector_matrix(lz)
-            train_features, train_targets, test_features, test_targets, val_features, val_targets = sfp.train_test_validate()
-            pickle.dump(train_features, f1)
-            pickle.dump(test_features, f2)
-            pickle.dump(val_features, f3)
-            pickle.dump(train_targets, f4)
-            pickle.dump(test_targets, f5)
-            pickle.dump(val_targets, f6)
-            pickle.dump(sfp.sequence_scaler, f7)
+    fp.query(START_DATE, '2014-12-31')
+    fp.construct_feature_vector_matrix('LZ_WEST')
+    fp.plot()
+    #         fp.construct_feature_vector_matrix(lz)
+    # for lz in LOAD_ZONES:
+    #     for ed in END_DATES:
+    #         print(lz + ed)
+    #         os.chdir('../normalized_datasets')
+    #         f1 = open('%s_%s_seq_train_features.pkl' % (ed, lz), 'w+')
+    #         f2 = open('%s_%s_seq_test_features.pkl' % (ed, lz), 'w+')
+    #         f3 = open('%s_%s_seq_val_features.pkl' % (ed, lz), 'w+')
+    #         f4 = open('%s_%s_seq_train_targets.pkl' % (ed, lz), 'w+')
+    #         f5 = open('%s_%s_seq_test_targets.pkl' % (ed, lz), 'w+')
+    #         f6 = open('%s_%s_seq_val_targets.pkl' % (ed, lz), 'w+')
+    #         f7 = open('%s_%s_seq_scaler.pkl' % (ed, lz), 'w+')
+    #         fp.query(START_DATE, ed)
+    #         fp.construct_feature_vector_matrix(lz)
+    #         train_features, train_targets, test_features, test_targets, val_features, val_targets = sfp.train_test_validate()
+    #         pickle.dump(train_features, f1)
+    #         pickle.dump(test_features, f2)
+    #         pickle.dump(val_features, f3)
+    #         pickle.dump(train_targets, f4)
+    #         pickle.dump(test_targets, f5)
+    #         pickle.dump(val_targets, f6)
+    #         pickle.dump(sfp.sequence_scaler, f7)
 

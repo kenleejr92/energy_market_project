@@ -15,26 +15,28 @@ def plot_results(statistic='MAPE'):
     index = np.arange(len(zones))
     plt.figure()
     for j in range(len(zones)):
+
+
         plt.bar(index[j] + j*bar_width,
-            df.loc[(df['Zone']==zones[j]) & (df['Model']=='MLPA')][statistic],
-            bar_width,
-            alpha=0.8,
-            color='y')
-        plt.bar(index[j] + j*bar_width,
-            df.loc[(df['Zone']==zones[j]) & (df['Model']=='LSTM')][statistic],
-            bar_width,
-            alpha=0.8,
-            color='b')
-        plt.bar(index[j] + j*bar_width,
-            df.loc[(df['Zone']==zones[j]) & (df['Model']=='StackedLSTM')][statistic],
+            np.mean(df.loc[(df['Zone']==zones[j]) & (df['Model']=='StackedLSTM')][statistic]),
             bar_width,
             alpha=0.8,
             color='g')
         plt.bar(index[j] + j*bar_width,
-            df.loc[(df['Zone']==zones[j])  & (df['Model']=='SimpleRNN')][statistic],
+            np.mean(df.loc[(df['Zone']==zones[j]) & (df['Model']=='LSTM')][statistic]),
+            bar_width,
+            alpha=0.8,
+            color='b')
+        plt.bar(index[j] + j*bar_width,
+            np.mean(df.loc[(df['Zone']==zones[j])  & (df['Model']=='SimpleRNN')][statistic]),
             bar_width,
             alpha=0.8,
             color='r')
+        plt.bar(index[j] + j*bar_width,
+            np.mean(df.loc[(df['Zone']==zones[j]) & (df['Model']=='MLPA')][statistic]),
+            bar_width,
+            alpha=0.8,
+            color='y')
 
     plt.xticks(index + bar_width, tuple(zones))
     yellow_patch = mpatches.Patch(color='y', label='MLP')
