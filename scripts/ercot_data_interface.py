@@ -32,6 +32,15 @@ SPPs = ['HB_BUSAVG',
         'LZ_SOUTH',  
         'LZ_WEST']   
 
+def weekday_of_date(date):
+    return calendar.day_name[date.weekday()]
+
+def work_day_or_holiday(date):
+    us_holidays = holidays.UnitedStates()
+    if date in us_holidays or weekday_of_date(date) == "Sunday" or weekday_of_date(date) == "Saturday":
+        return int(1)
+    else: return int(0)
+
 class ercot_data_interface(object):
 
     def __init__(self):
@@ -50,9 +59,12 @@ class ercot_data_interface(object):
 
     def query_prices(self, nodes, start_date, end_date):
         node_string=''
-        for node in nodes:
-            node_string = node_string + node + ',' + ' '
-        node_string = node_string[:-2]
+        if isinstance(nodes, str): 
+            node_string = node_string + nodes
+        else:         
+            for node in nodes:
+                node_string = node_string + node + ',' + ' '
+            node_string = node_string[:-2]
         s = """SELECT DAM_LMP0.delivery_date, DAM_LMP0.hour_ending, %s 
                                     from DAM_LMP0 join DAM_LMP1 on (DAM_LMP0.delivery_date = DAM_LMP1.delivery_date and DAM_LMP0.hour_ending = DAM_LMP1.hour_ending) 
                                     join DAM_LMP2 on (DAM_LMP0.delivery_date = DAM_LMP2.delivery_date and DAM_LMP0.hour_ending = DAM_LMP2.hour_ending)
@@ -149,14 +161,7 @@ class ercot_data_interface(object):
             return CRR_nodes
         
 
-def weekday_of_date(date):
-    return calendar.day_name[date.weekday()]
 
-def work_day_or_holiday(date):
-    us_holidays = holidays.UnitedStates()
-    if date in us_holidays or weekday_of_date(date) == "Sunday" or weekday_of_date(date) == "Saturday":
-        return int(1)
-    else: return int(0)
 
 
 if __name__ == '__main__':
