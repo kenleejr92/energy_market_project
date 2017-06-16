@@ -8,8 +8,8 @@ import pandas as pd
 import pymysql
 from datetime import datetime
 import re
+#import holidays
 import calendar
-import holidays
 import matplotlib.pyplot as plt
 from sets import Set
 
@@ -35,11 +35,11 @@ SPPs = ['HB_BUSAVG',
 def weekday_of_date(date):
     return calendar.day_name[date.weekday()]
 
-def work_day_or_holiday(date):
-    us_holidays = holidays.UnitedStates()
-    if date in us_holidays or weekday_of_date(date) == "Sunday" or weekday_of_date(date) == "Saturday":
-        return int(1)
-    else: return int(0)
+#def work_day_or_holiday(date):
+#    us_holidays = holidays.UnitedStates()
+#    if date in us_holidays or weekday_of_date(date) == "Sunday" or weekday_of_date(date) == "Saturday":
+#        return int(1)
+#    else: return int(0)
 
 class ercot_data_interface(object):
 
