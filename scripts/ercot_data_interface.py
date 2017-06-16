@@ -131,9 +131,9 @@ class ercot_data_interface(object):
                 if matches: matching_patterns.add(matches[0][:-1])  
             for pattern in matching_patterns:
                 pattern2 = re.compile('(.*%s.*)' % pattern)
-                for node in self.all_nodes:
-                    if re.search(pattern2, node):
-                        nn.append(node)
+                for nodex in self.all_nodes:
+                    if re.search(pattern2, nodex):
+                        nn.append(nodex)
             return [node] + nn
 
     def get_CRR_nodes(self):
