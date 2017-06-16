@@ -43,8 +43,8 @@ def weekday_of_date(date):
 
 class ercot_data_interface(object):
 
-    def __init__(self):
-        self.connection = pymysql.connect(host=HOST, user=USER, password=PASSWORD, db=DB, port=3306,  cursorclass=pymysql.cursors.Cursor)
+    def __init__(self, password=PASSWORD):
+        self.connection = pymysql.connect(host=HOST, user=USER, password=password, db=DB, port=3306,  cursorclass=pymysql.cursors.Cursor)
         self.all_nodes = []
         self.all_nodes_dict = {}
         with self.connection.cursor() as cursor:                      
