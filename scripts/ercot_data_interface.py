@@ -8,8 +8,8 @@ import pandas as pd
 import pymysql
 from datetime import datetime
 import re
+#import holidays
 import calendar
-import holidays
 import matplotlib.pyplot as plt
 from sets import Set
 
@@ -35,16 +35,16 @@ SPPs = ['HB_BUSAVG',
 def weekday_of_date(date):
     return calendar.day_name[date.weekday()]
 
-def work_day_or_holiday(date):
-    us_holidays = holidays.UnitedStates()
-    if date in us_holidays or weekday_of_date(date) == "Sunday" or weekday_of_date(date) == "Saturday":
-        return int(1)
-    else: return int(0)
+#def work_day_or_holiday(date):
+#    us_holidays = holidays.UnitedStates()
+#    if date in us_holidays or weekday_of_date(date) == "Sunday" or weekday_of_date(date) == "Saturday":
+#        return int(1)
+#    else: return int(0)
 
 class ercot_data_interface(object):
 
-    def __init__(self):
-        self.connection = pymysql.connect(host=HOST, user=USER, password=PASSWORD, db=DB, port=3306,  cursorclass=pymysql.cursors.Cursor)
+    def __init__(self, password=PASSWORD):
+        self.connection = pymysql.connect(host=HOST, user=USER, password=password, db=DB, port=3306,  cursorclass=pymysql.cursors.Cursor)
         self.all_nodes = []
         self.all_nodes_dict = {}
         with self.connection.cursor() as cursor:                      
@@ -131,9 +131,9 @@ class ercot_data_interface(object):
                 if matches: matching_patterns.add(matches[0][:-1])  
             for pattern in matching_patterns:
                 pattern2 = re.compile('(.*%s.*)' % pattern)
-                for node in self.all_nodes:
-                    if re.search(pattern2, node):
-                        nn.append(node)
+                for nodex in self.all_nodes:
+                    if re.search(pattern2, nodex):
+                        nn.append(nodex)
             return [node] + nn
 
     def get_CRR_nodes(self):
