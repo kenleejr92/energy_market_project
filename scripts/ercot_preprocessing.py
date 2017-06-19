@@ -38,12 +38,18 @@ def plot_autocorrelations(x, max_lag=24):
 
 class ARIMA(object):
 
-    def __init__(self, d=0, q=2, p=2, seasonal=24):
+    def __init__(self, p=2, d=0, q=2, seasonal=24):
         self.linear_regression = None
         self.d = d
         self.q = q
         self.p = p
         self.seasonal = seasonal
+
+    def deseasonalize(self):
+        pass
+
+    def re_seasonalize(self):
+        pass
 
     def make_lag_matrix(self, v, p):
         X = []
@@ -71,7 +77,7 @@ class ARIMA(object):
             y_hat = self.linear_regression.predict(X)
             y_hat = np.expand_dims(y_hat, 1)
             p_hat = y_hat + x[self.p:-24]
-            return p_hat
+            return p_hat, x[self.seasonal + self.p:]
         else:
             y_hat = self.linear_regression.predict(X)
             errors = y_hat - y
@@ -80,12 +86,7 @@ class ARIMA(object):
             y_hat = y_hat[self.q:] + error_term
             y_hat = np.expand_dims(y_hat, 1)
             p_hat = y_hat + x[self.p+self.q:-24]
-            return p_hat
-
-    def predict_n_steps(self, x, n):
-        v = x[self.seasonal:] - x[:-self.seasonal]
-        X = self.make_lag_matrix(v, self.p)
-        
+            return p_hat, x[self.seasonal + self.p + self.q:]
 
     def plot_results(self, x):
         pass
@@ -100,16 +101,14 @@ if __name__ == '__main__':
     crr_nodes = ercot.get_CRR_nodes()
     # sources_sinks = ercot.get_sources_sinks()
     # nn = ercot.get_nearest_CRR_neighbors(sources_sinks[20])
-    x = ercot.query_prices(crr_nodes[1], '2011-01-01', '2015-5-23').as_matrix()
-    y = ercot.query_prices(crr_nodes[1], '2015-5-23', '2016-5-23').as_matrix()
-    p=5
-    q=5
-    seasonal=24
-    arima = ARIMA(d=0, q=q, p=p)
+    x = ercot.query_prices(crr_nodes[1], '2011-01-01', '2014-5-23').as_matrix()
+    y = ercot.query_prices(crr_nodes[1], '2014-5-23', '2016-5-23').as_matrix()
+    arima = ARIMA(p=5, d=0, q=5, seasonal=24)
     arima.fit(x)
-    p_hat = arima.predict(y)
-    print np.mean(np.abs(p_hat-y[seasonal+p+q:]))
-    plt.plot(y[seasonal+p+q:], label='actual')
+    p_hat, z = arima.predict(y)
+    # p_hat, z = arima.predict(y)
+    # # print np.mean(np.abs(p_hat-z))
+    plt.plot(z, label='actual')
     plt.plot(p_hat, label='predicted')
     plt.legend()
     plt.show()
