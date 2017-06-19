@@ -45,12 +45,6 @@ class ARIMA(object):
         self.p = p
         self.seasonal = seasonal
 
-    def deseasonalize(self):
-        pass
-
-    def re_seasonalize(self):
-        pass
-
     def make_lag_matrix(self, v, p):
         X = []
         for k in np.arange(1, p):
@@ -88,12 +82,17 @@ class ARIMA(object):
             p_hat = y_hat + x[self.p+self.q:-24]
             return p_hat, x[self.seasonal + self.p + self.q:]
 
-    def plot_results(self, x):
-        pass
+    def plot_predicted_vs_actual(self, x):
+        p_hat, z self.predict(x)
+        plt.plot(z, label='actual')
+        plt.plot(p_hat, label='predicted')
+        plt.legend()
+        plt.show()
 
 
-    def print_results(self):
-        pass
+    def mape(self, x):
+        p_hat, z = self.predict(x)
+        return np.mean(np.abs(p_hat-z))
 
 
 if __name__ == '__main__':
@@ -105,10 +104,4 @@ if __name__ == '__main__':
     y = ercot.query_prices(crr_nodes[1], '2014-5-23', '2016-5-23').as_matrix()
     arima = ARIMA(p=5, d=0, q=5, seasonal=24)
     arima.fit(x)
-    p_hat, z = arima.predict(y)
-    # p_hat, z = arima.predict(y)
-    # # print np.mean(np.abs(p_hat-z))
-    plt.plot(z, label='actual')
-    plt.plot(p_hat, label='predicted')
-    plt.legend()
-    plt.show()
+    
