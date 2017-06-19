@@ -83,7 +83,7 @@ class ARIMA(object):
             return p_hat, x[self.seasonal + self.p + self.q:]
 
     def plot_predicted_vs_actual(self, x):
-        p_hat, z self.predict(x)
+        p_hat, z = self.predict(x)
         plt.plot(z, label='actual')
         plt.plot(p_hat, label='predicted')
         plt.legend()
