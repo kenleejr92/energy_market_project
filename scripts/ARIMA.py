@@ -90,7 +90,7 @@ class ARIMA(object):
         plt.show()
 
 
-    def mape(self, x):
+    def mae(self, x):
         p_hat, z = self.predict(x)
         return np.mean(np.abs(p_hat-z))
 
@@ -104,4 +104,6 @@ if __name__ == '__main__':
     y = ercot.query_prices(crr_nodes[1], '2014-5-23', '2016-5-23').as_matrix()
     arima = ARIMA(p=5, d=0, q=5, seasonal=24)
     arima.fit(x)
+    arima.plot_predicted_vs_actual(y)
+    print arima.mae(y)
     
