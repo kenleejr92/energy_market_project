@@ -47,12 +47,17 @@ class ARIMA(object):
 
     def make_lag_matrix(self, v, p):
         X = []
-        for k in np.arange(1, p):
-            v_k= v[(p-k):-k]
-            X.append(v_k)
+        if p > 1:
+            for k in np.arange(1, p):
+                v_k= v[(p-k):-k]
+                X.append(v_k)
         X.append(v[:-p])
-        X = np.squeeze(np.array(X))
-        X = np.swapaxes(X, 0, 1)
+        X = np.array(X)
+        X = np.squeeze(X)
+        if p >1: 
+            X = np.swapaxes(X, 0, 1)
+        else:
+            X = np.expand_dims(X, 1)
         return X
 
     def fit(self, x):
@@ -102,7 +107,7 @@ if __name__ == '__main__':
     # nn = ercot.get_nearest_CRR_neighbors(sources_sinks[20])
     x = ercot.query_prices(crr_nodes[1], '2011-01-01', '2014-5-23').as_matrix()
     y = ercot.query_prices(crr_nodes[1], '2014-5-23', '2016-5-23').as_matrix()
-    arima = ARIMA(p=5, d=0, q=5, seasonal=24)
+    arima = ARIMA(p=1, d=0, q=1, seasonal=24)
     arima.fit(x)
     arima.plot_predicted_vs_actual(y)
     print arima.mae(y)
