@@ -35,17 +35,26 @@ def variable_summaries(var):
         tf.summary.scalar('min', tf.reduce_min(var))
         tf.summary.histogram('histogram', var)
 
+def time_to_batch(value, dilation, name=None):
+    with tf.name_scope('time_to_batch'):
+        shape = tf.shape(value)
+        pad_elements = dilation - 1 - (shape[1] + dilation - 1) % dilation
+        padded = tf.pad(value, [[0, 0], [0, pad_elements], [0, 0]])
+        reshaped = tf.reshape(padded, [-1, dilation, shape[2]])
+        transposed = tf.transpose(reshaped, perm=[1, 0, 2])
+        return tf.reshape(transposed, [shape[0] * dilation, -1, shape[2]])
 
 class WaveNet(object):
 
     def __init__(self):
         self.input_length = None
         self.initial_filter_width = 2
+        self.residual_channels = 5
+        self.variables = create_variables()
 
 
 
     def create_variables(self):
-        def _create_variables(self):
         '''This function creates all variables used by the network.
         This allows us to share them between multiple calls to the loss
         function and generation function.'''
@@ -57,80 +66,15 @@ class WaveNet(object):
                 layer = dict()
                 initial_channels = 1
                 initial_filter_width = self.initial_filter_width
-                layer['filter'] = create_variable(
-                    'filter',
-                    [initial_filter_width,
-                     initial_channels,
-                     self.residual_channels])
+                layer['filter'] = weight_variable([initial_filter_width, initial_channels, self.residual_channels])
                 var['causal_layer'] = layer
 
-            var['dilated_stack'] = list()
-            with tf.variable_scope('dilated_stack'):
-                for i, dilation in enumerate(self.dilations):
-                    with tf.variable_scope('layer{}'.format(i)):
-                        current = dict()
-                        current['filter'] = create_variable(
-                            'filter',
-                            [self.filter_width,
-                             self.residual_channels,
-                             self.dilation_channels])
-                        current['gate'] = create_variable(
-                            'gate',
-                            [self.filter_width,
-                             self.residual_channels,
-                             self.dilation_channels])
-                        current['dense'] = create_variable(
-                            'dense',
-                            [1,
-                             self.dilation_channels,
-                             self.residual_channels])
-                        current['skip'] = create_variable(
-                            'skip',
-                            [1,
-                             self.dilation_channels,
-                             self.skip_channels])
-
-                        if self.global_condition_channels is not None:
-                            current['gc_gateweights'] = create_variable(
-                                'gc_gate',
-                                [1, self.global_condition_channels,
-                                 self.dilation_channels])
-                            current['gc_filtweights'] = create_variable(
-                                'gc_filter',
-                                [1, self.global_condition_channels,
-                                 self.dilation_channels])
-
-                        if self.use_biases:
-                            current['filter_bias'] = create_bias_variable(
-                                'filter_bias',
-                                [self.dilation_channels])
-                            current['gate_bias'] = create_bias_variable(
-                                'gate_bias',
-                                [self.dilation_channels])
-                            current['dense_bias'] = create_bias_variable(
-                                'dense_bias',
-                                [self.residual_channels])
-                            current['skip_bias'] = create_bias_variable(
-                                'slip_bias',
-                                [self.skip_channels])
-
-                        var['dilated_stack'].append(current)
-
-            with tf.variable_scope('postprocessing'):
-                current = dict()
-                current['postprocess1'] = create_variable(
-                    'postprocess1',
-                    [1, self.skip_channels, self.skip_channels])
-                current['postprocess2'] = create_variable(
-                    'postprocess2',
-                    [1, self.skip_channels, self.quantization_channels])
-                if self.use_biases:
-                    current['postprocess1_bias'] = create_bias_variable(
-                        'postprocess1_bias',
-                        [self.skip_channels])
-                    current['postprocess2_bias'] = create_bias_variable(
-                        'postprocess2_bias',
-                        [self.quantization_channels])
-                var['postprocessing'] = current
 
         return var
+
+
+if __name__ == '__main__':
+    tf_session = tf.Session()
+    x = np.arange(1,100)
+    y = time_to_batch(x, 1)
+    print y
