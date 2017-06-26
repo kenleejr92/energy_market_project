@@ -75,7 +75,7 @@ class ARIMA(object):
         if self.q == 0:
             y_hat = self.linear_regression.predict(X)
             y_hat = np.expand_dims(y_hat, 1)
-            p_hat = y_hat + x[self.p:-24]
+            p_hat = y_hat + x[self.p:-self.seasonal]
             return p_hat, x[self.seasonal + self.p:]
         else:
             y_hat = self.linear_regression.predict(X)
@@ -84,7 +84,7 @@ class ARIMA(object):
             error_term = np.sum(E, axis=1)
             y_hat = y_hat[self.q:] + error_term
             y_hat = np.expand_dims(y_hat, 1)
-            p_hat = y_hat + x[self.p+self.q:-24]
+            p_hat = y_hat + x[self.p+self.q:-self.seasonal]
             return p_hat, x[self.seasonal + self.p + self.q:]
 
     def plot_predicted_vs_actual(self, x):
