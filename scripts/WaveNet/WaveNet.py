@@ -37,6 +37,7 @@ def variable_summaries(var):
 
 def time_to_batch(value, dilation, name=None):
     with tf.name_scope('time_to_batch'):
+        #shape = [number of batches, number of samples, number of channels]
         shape = tf.shape(value)
         pad_elements = dilation - 1 - (shape[1] + dilation - 1) % dilation
         padded = tf.pad(value, [[0, 0], [0, pad_elements], [0, 0]])
@@ -76,5 +77,8 @@ class WaveNet(object):
 if __name__ == '__main__':
     tf_session = tf.Session()
     x = np.arange(1,100)
-    y = time_to_batch(x, 1)
-    print y
+    x = np.expand_dims(x, 1)
+    x = np.expand_dims(x, 0)
+    print x.shape
+    y = time_to_batch(x, dilation=2)
+    print tf_session.run(tf.shape(y))
