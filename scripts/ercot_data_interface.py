@@ -159,19 +159,29 @@ class ercot_data_interface(object):
                     if re.search(pattern2, node):
                         CRR_nodes.append(node)
             return CRR_nodes
-        
 
 
+    def get_train_test_val(self, node):
+        X = self.query_prices(node, '2011-01-01', '2016-5-23').as_matrix()
+        train = X[:3*24*7*52]
+        val = X[3*24*7*52:int(3.5*24*7*52)]
+        test = X[int(3.5*24*7*52):]
+
+        return train, test, val
 
 
 if __name__ == '__main__':
     ercot = ercot_data_interface()
     sources_sinks = ercot.get_sources_sinks()
-    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[20])
-    df = ercot.query_prices(nn, '2011-01-01', '2016-12-31')
-    m = df.as_matrix()
-    v = m[24:] - m[:-24]
-    s = v[24*7:] - v[:-24*7]
-    plt.plot(s)
+    #source_sinks[20] gave an error
+    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
+    # df = ercot.query_prices(nn, '2011-01-01', '2016-12-31')
+    train, test, val = ercot.get_train_test_val(nn[0])
+    print train.shape
+    plt.plot(train, label='train')
+    plt.plot(test, label='test')
+    plt.plot(val, label='val')
+    plt.legend()
     plt.show()
+
 
