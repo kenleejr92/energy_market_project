@@ -6,6 +6,14 @@ from ercot_data_interface import ercot_data_interface
 import matplotlib.pyplot as plt
 from ops import * 
 
+
+LOG_DIR = '/home/kenleejr92/energy_market_project/scripts/WaveNet/tmp'
+SAVE_PATH = LOG_DIR + '/WaveNet'
+TRAIN_LOG = LOG_DIR + '/train'
+VAL_LOG = LOG_DIR + '/val'
+
+
+
 def weight_variable(shape, Name):
     initial = tf.truncated_normal(shape, stddev=0.1)
     return tf.Variable(initial, name=Name)
@@ -38,37 +46,46 @@ def variable_summaries(var):
         tf.summary.histogram('histogram', var)
 
 
+def time_series_to_batches(time_series, sequence_length, batch_size):
+    if sequence_length == -1:
+        x = np.reshape(time_series, (1, time_series.shape[0], 1))
+        return x
+    else:
+        num_sequences = int(np.shape(time_series)[0] / sequence_length) + 1
+        num_leftover = num_sequences*sequence_length - time_series.shape[0]
+        x = np.pad(time_series, ((0, num_leftover)), mode='constant', constant_values=(0, 0))
+        x = np.reshape(x, (num_sequences, sequence_length, 1))
 
+        num_batches = int(num_sequences / batch_size) + 1
+        num_leftover = num_batches*batch_size - num_sequences
+        x = np.pad(x, ((0, num_leftover), (0, 0), (0, 0)), mode='constant', constant_values=((0, 0), (0, 0), (0, 0)))
+        batches = np.reshape(x, (num_batches, batch_size, sequence_length, 1))
+        return batches
 
 
 class WaveNet(object):
 
-    def __init__(self):
-        self.input_length = None
+    def __init__(self, batch_size, sequence_length):
+        self.batch_size = batch_size
+        self.sequence_length = sequence_length
         self.filter_width = 2
-        self.sequence_length = 168
-        self.residual_channels = 5
-        self.dilation_channels = 5
+        self.residual_channels = 32
+        self.dilation_channels = 32
         self.output_channels = 1
-        self.skip_channels = 5
+        self.skip_channels = 256
         self.use_biases = True
-        self.dilations = [1, 2, 4, 8, 1, 2, 4, 8]
+        self.dilations = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
+                  1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+
         self.variables = self.create_variables()
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
         self.histograms = True
 
 
     def calculate_receptive_field(self, filter_width, dilations):
-        receptive_field = (filter_width - 1) * sum(dilations) + 1 + filter_width - 1
+        receptive_field = (filter_width - 1) * sum(dilations) + filter_width
+        print receptive_field
         return receptive_field
-
-    def preprocess_time_series(self, time_series, batch_size):
-        if batch_size == 1:
-            y = np.append(time_series, time_series[-1])[1:]
-            x = time_series
-            return x, y[self.receptive_field-1:]
-        else:
-            np.reshape(time_series, (batch_size, time_series.shape[0]))
 
 
     def create_placeholders(self):
@@ -76,9 +93,8 @@ class WaveNet(object):
         Create the TensorFlow placeholders for the model.
         """
         x_ = tf.placeholder('float', [None, self.sequence_length, 1], name='input_sequence')
-        y_ = tf.placeholder('float', [None, self.sequence_length, 1], name='target_sequence')
 
-        return x_, y_
+        return x_
 
     def create_variables(self):
         '''This function creates all variables used by the network.
@@ -177,9 +193,11 @@ class WaveNet(object):
             conv_filter = tf.add(conv_filter, filter_bias)
             conv_gate = tf.add(conv_gate, gate_bias)
 
-        out = tf.tanh(conv_filter) * tf.sigmoid(conv_gate)
+        # out = tf.tanh(conv_filter) * tf.sigmoid(conv_gate)
 
         # The 1x1 conv to produce the residual output
+        out = tf.nn.relu(conv_filter)
+
         weights_dense = variables['dense']
         transformed = tf.nn.conv1d(
             out, weights_dense, stride=1, padding="SAME", name="dense")
@@ -225,6 +243,7 @@ class WaveNet(object):
 
         output_width = tf.shape(input_batch)[1] - self.receptive_field + 1
 
+
         # Add all defined dilation layers.
         with tf.name_scope('dilated_stack'):
             for layer_index, dilation in enumerate(self.dilations):
@@ -259,42 +278,132 @@ class WaveNet(object):
             # conv2 = tf.nn.conv1d(transformed2, w2, stride=1, padding="SAME")
             # if self.use_biases:
             #     conv2 = tf.add(conv2, b2)
-
-        return conv1
-
-    def loss(self):
-        pass
+            return conv1
 
 
+    def time_series_to_batches(self, time_series):
+        if self.sequence_length == -1:
+            x = np.reshape(time_series, (1, time_series.shape[0], 1))
+            return x
+        else:
+            num_sequences = int(np.shape(time_series)[0] / self.sequence_length) + 1
+            num_leftover = num_sequences*self.sequence_length - time_series.shape[0]
+            x = np.pad(time_series, ((0, num_leftover)), mode='constant', constant_values=(0, 0))
+            batches = np.reshape(x, (num_sequences, self.sequence_length, 1))
+            return batches
 
-    def train(self):
-        pass
+
+    def loss(self, input_batch, l2_regularization_strength = False):
+        # Cut off the last sample of network input to preserve causality.
+        batch_size = tf.shape(input_batch)[0]
+        network_input = tf.reshape(input_batch, [batch_size, -1, 1])
+        network_input_width = tf.shape(network_input)[1] - 1
+        network_input = tf.slice(network_input, [0, 0, 0], [-1, network_input_width, -1])
+        
+        raw_output = self.create_network(network_input)
+
+        with tf.name_scope('loss'):
+            # Cut off the samples corresponding to the receptive field
+            # for the first predicted sample.
+            #subtract 1 from receptive field??????????????????
+            target_output = tf.slice(tf.reshape(network_input, [batch_size, -1, self.output_channels]), [0, self.receptive_field-1, 0], [-1, -1, -1])
+            target_output = tf.reshape(target_output, [-1, self.output_channels])
+            prediction = tf.reshape(raw_output, [-1, self.output_channels])
+
+            
+            #Mean Absolte Error
+            loss = tf.reduce_mean(tf.abs(target_output - prediction))
+
+
+            tf.add_to_collection('prediction', prediction)
+            tf.add_to_collection('target_output', target_output)
+            tf.add_to_collection('MAE', loss)
+
+            tf.summary.scalar('loss', loss)
+
+            if l2_regularization_strength == False:
+                return loss, target_output, prediction, raw_output
+            else:
+                # L2 regularization for all trainable parameters
+                l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if not('bias' in v.name)])
+
+                # Add the regularization term to the loss
+                total_loss = (loss + l2_regularization_strength * l2_loss)
+
+                tf.summary.scalar('l2_loss', l2_loss)
+                tf.summary.scalar('total_loss', total_loss)
+
+                return total_loss
+
+
+    def restore_model(self, tf_session, global_step=19):
+        new_saver = tf.train.import_meta_graph(SAVE_PATH + '-' + str(global_step) + '.meta')
+        new_saver.restore(tf_session, tf.train.latest_checkpoint(LOG_DIR))
+        self.prediction = tf.get_collection('prediction')
+        self.target_output = tf.get_collection('target_output')
+        self.MAE = tf.get_collection('MAE')
+
+
+    def train(self, time_series, epochs=20):
+
+        tf_session = tf.Session()
+        x_ = self.create_placeholders()
+        self.MAE, self.target_output, self.prediction, self.raw_output = self.loss(x_)
+        merged = tf.summary.merge_all()
+        train_step = tf.train.AdamOptimizer(1e-4).minimize(self.MAE)
+        init_op = tf.global_variables_initializer()
+        tf_session.run(init_op)
+        tf_saver = tf.train.Saver()
+        train_writer = tf.summary.FileWriter(TRAIN_LOG, tf_session.graph)
+
+
+        batches = self.time_series_to_batches(time_series)
+        for e in range(epochs):
+            for i in np.arange(0, batches.shape[0], self.batch_size):
+                tr_feed = {x_: batches[i:i+self.batch_size, :, :]}
+                tf_session.run(train_step, feed_dict=tr_feed)
+                
+            tr_feed = {x_: batches[0:0+self.batch_size, :, :]}
+            print tf_session.run(self.MAE, feed_dict=tr_feed)
+            predicted, actual, raw_output = tf_session.run([self.prediction, self.target_output, self.raw_output], feed_dict=tr_feed)
+            # plt.plot(predicted)
+            # plt.plot(actual)
+            # plt.show()
+            tf_saver.save(tf_session, SAVE_PATH, global_step=e)
+            summary_train = tf_session.run(merged, feed_dict=tr_feed)
+            train_writer.add_summary(summary_train, e)
+
+
+    def inference(self, time_series):
+        time_series = self.time_series_to_batches(time_series)
+
+        tf_session = tf.Session()
+        self.restore_model(tf_session)
+        inf_feed = {'input_sequence:0': time_series[0:self.batch_size]}
+        predicted, actual, MAE = tf_session.run([self.prediction, self.target_output, self.MAE], inf_feed)
+        print MAE
+        plt.plot(predicted[0][0:100], label='predicted')
+        plt.plot(actual[0][0:100], label='actual')
+        plt.legend()
+        plt.show()
+
+
 
 
 if __name__ == '__main__':
-    test = np.arange(0, 168)
-    
-    tf_session = tf.Session()
-    wavenet = WaveNet()
-    x, y = wavenet.preprocess_time_series(test, batch_size=1)
-    plt.plot(x)
-    plt.plot(y)
-    plt.show()
-    test = np.expand_dims(test, 1)
-    test = np.expand_dims(test, 0)
-    print x.shape, y.shape
-    x_, y_ = wavenet.create_placeholders()
-    output = wavenet.create_network(x_)
-    init_op = tf.global_variables_initializer()
-    tf_session.run(init_op)
-    print wavenet.receptive_field
-    print test[:, wavenet.receptive_field-1:].shape
-    print tf_session.run(tf.shape(output), feed_dict={x_: test})
+    sine_wave = np.sin(np.arange(0, 20000, 0.5))
+    wavenet = WaveNet(batch_size=128, sequence_length=8000)
+    wavenet.inference(sine_wave)
+    # tf_session = tf.Session()
+    # wavenet = WaveNet()
+    # x_, y_ = wavenet.create_placeholders()
+    # output = wavenet.create_network(x_)
+    # init_op = tf.global_variables_initializer()
+    # tf_session.run(init_op)
+    # print tf_session.run(tf.shape(output), feed_dict={x_: test})
 
 
-    ercot = ercot_data_interface()
-    sources_sinks = ercot.get_sources_sinks()
-    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
-    train, test, val = ercot.get_train_test_val(nn[0])
-    x, y = wavenet.preprocess_time_series(train, batch_size=1)
-    print x.shape, y.shape
+    # ercot = ercot_data_interface()
+    # sources_sinks = ercot.get_sources_sinks()
+    # nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
+    # train, test, val = ercot.get_train_test_val(nn[0])
