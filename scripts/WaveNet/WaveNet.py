@@ -306,7 +306,7 @@ class WaveNet(object):
             # Cut off the samples corresponding to the receptive field
             # for the first predicted sample.
             #subtract 1 from receptive field??????????????????
-            target_output = tf.slice(tf.reshape(network_input, [batch_size, -1, self.output_channels]), [0, self.receptive_field-1, 0], [-1, -1, -1])
+            target_output = tf.slice(tf.reshape(network_input, [batch_size, -1, self.output_channels]), [0, self.receptive_field, 0], [-1, -1, -1])
             target_output = tf.reshape(target_output, [-1, self.output_channels])
             prediction = tf.reshape(raw_output, [-1, self.output_channels])
 
@@ -366,20 +366,17 @@ class WaveNet(object):
             tr_feed = {x_: batches[0:0+self.batch_size, :, :]}
             print tf_session.run(self.MAE, feed_dict=tr_feed)
             predicted, actual, raw_output = tf_session.run([self.prediction, self.target_output, self.raw_output], feed_dict=tr_feed)
-            # plt.plot(predicted)
-            # plt.plot(actual)
-            # plt.show()
             tf_saver.save(tf_session, SAVE_PATH, global_step=e)
             summary_train = tf_session.run(merged, feed_dict=tr_feed)
             train_writer.add_summary(summary_train, e)
 
 
     def inference(self, time_series):
-        time_series = self.time_series_to_batches(time_series)
+        ts = self.time_series_to_batches(time_series)
 
         tf_session = tf.Session()
         self.restore_model(tf_session)
-        inf_feed = {'input_sequence:0': time_series[0:self.batch_size]}
+        inf_feed = {'input_sequence:0': ts[0:self.batch_size]}
         predicted, actual, MAE = tf_session.run([self.prediction, self.target_output, self.MAE], inf_feed)
         print MAE
         plt.plot(predicted[0][0:100], label='predicted')
@@ -393,7 +390,7 @@ class WaveNet(object):
 if __name__ == '__main__':
     sine_wave = np.sin(np.arange(0, 20000, 0.5))
     wavenet = WaveNet(batch_size=128, sequence_length=8000)
-    wavenet.inference(sine_wave)
+    wavenet.train(sine_wave)
     # tf_session = tf.Session()
     # wavenet = WaveNet()
     # x_, y_ = wavenet.create_placeholders()
