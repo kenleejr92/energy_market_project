@@ -296,6 +296,7 @@ class WaveNet(object):
     def loss(self, input_batch, l2_regularization_strength = False):
         # Cut off the last sample of network input to preserve causality.
         batch_size = tf.shape(input_batch)[0]
+        encoded = tf.reshape(input_batch, [batch_size, -1, 1])
         network_input = tf.reshape(input_batch, [batch_size, -1, 1])
         network_input_width = tf.shape(network_input)[1] - 1
         network_input = tf.slice(network_input, [0, 0, 0], [-1, network_input_width, -1])
@@ -306,7 +307,7 @@ class WaveNet(object):
             # Cut off the samples corresponding to the receptive field
             # for the first predicted sample.
             #subtract 1 from receptive field??????????????????
-            target_output = tf.slice(tf.reshape(network_input, [batch_size, -1, self.output_channels]), [0, self.receptive_field, 0], [-1, -1, -1])
+            target_output = tf.slice(tf.reshape(encoded, [batch_size, -1, self.output_channels]), [0, self.receptive_field, 0], [-1, -1, -1])
             target_output = tf.reshape(target_output, [-1, self.output_channels])
             prediction = tf.reshape(raw_output, [-1, self.output_channels])
 
@@ -336,7 +337,7 @@ class WaveNet(object):
                 return total_loss
 
 
-    def restore_model(self, tf_session, global_step=19):
+    def restore_model(self, tf_session, global_step=29):
         new_saver = tf.train.import_meta_graph(SAVE_PATH + '-' + str(global_step) + '.meta')
         new_saver.restore(tf_session, tf.train.latest_checkpoint(LOG_DIR))
         self.prediction = tf.get_collection('prediction')
@@ -344,7 +345,7 @@ class WaveNet(object):
         self.MAE = tf.get_collection('MAE')
 
 
-    def train(self, time_series, epochs=20):
+    def train(self, time_series, epochs=30):
 
         tf_session = tf.Session()
         x_ = self.create_placeholders()
@@ -390,7 +391,7 @@ class WaveNet(object):
 if __name__ == '__main__':
     sine_wave = np.sin(np.arange(0, 20000, 0.5))
     wavenet = WaveNet(batch_size=128, sequence_length=8000)
-    wavenet.train(sine_wave)
+    wavenet.inference(sine_wave)
     # tf_session = tf.Session()
     # wavenet = WaveNet()
     # x_, y_ = wavenet.create_placeholders()
