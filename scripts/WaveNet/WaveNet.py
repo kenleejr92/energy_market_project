@@ -74,9 +74,8 @@ class WaveNet(object):
         self.output_channels = 1
         self.skip_channels = 256
         self.use_biases = True
-        self.dilations = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512,
-                  1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-
+        self.dilations = [1, 2, 4, 8]
+        self.condition_channels = None
         self.variables = self.create_variables()
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
         self.histograms = True
@@ -110,6 +109,7 @@ class WaveNet(object):
                 layer['filter'] = weight_variable([self.filter_width, initial_channels, self.residual_channels], 'filter')
                 var['causal_layer'] = layer
 
+
         var['dilated_stack'] = list()
         with tf.variable_scope('dilated_stack'):
             for i, dilation in enumerate(self.dilations):
@@ -131,10 +131,8 @@ class WaveNet(object):
 
         with tf.variable_scope('postprocessing'):
                 current = dict()
-                current['postprocess1'] = weight_variable([1, self.skip_channels, self.skip_channels], 'postprocess1')
                 current['postprocess2'] = weight_variable([1, self.skip_channels, self.output_channels], 'postprocess2')
                 if self.use_biases:
-                    current['postprocess1_bias'] = bias_variable([self.skip_channels], 'postprocess1_bias')
                     current['postprocess2_bias'] = bias_variable([self.output_channels], 'postprocess2_bias')
                 var['postprocessing'] = current
 
@@ -252,19 +250,14 @@ class WaveNet(object):
                     outputs.append(output)
 
         with tf.name_scope('postprocessing'):
-            # Perform (+) -> ReLU -> 1x1 conv -> ReLU -> 1x1 conv to
-            # postprocess the output.
-            w1 = self.variables['postprocessing']['postprocess1']
+            #Linear layer
             w2 = self.variables['postprocessing']['postprocess2']
             if self.use_biases:
-                b1 = self.variables['postprocessing']['postprocess1_bias']
                 b2 = self.variables['postprocessing']['postprocess2_bias']
 
             if self.histograms:
-                tf.summary.histogram('postprocess1_weights', w1)
                 tf.summary.histogram('postprocess2_weights', w2)
                 if self.use_biases:
-                    tf.summary.histogram('postprocess1_biases', b1)
                     tf.summary.histogram('postprocess2_biases', b2)
 
             # We skip connections from the outputs of each layer, adding them
@@ -293,7 +286,7 @@ class WaveNet(object):
             return batches
 
 
-    def loss(self, input_batch, l2_regularization_strength = False):
+    def loss(self, input_batch, l2_regularization_strength=0.01):
         # Cut off the last sample of network input to preserve causality.
         batch_size = tf.shape(input_batch)[0]
         encoded = tf.reshape(input_batch, [batch_size, -1, 1])
@@ -306,14 +299,13 @@ class WaveNet(object):
         with tf.name_scope('loss'):
             # Cut off the samples corresponding to the receptive field
             # for the first predicted sample.
-            #subtract 1 from receptive field??????????????????
             target_output = tf.slice(tf.reshape(encoded, [batch_size, -1, self.output_channels]), [0, self.receptive_field, 0], [-1, -1, -1])
             target_output = tf.reshape(target_output, [-1, self.output_channels])
             prediction = tf.reshape(raw_output, [-1, self.output_channels])
 
             
             #Mean Absolte Error
-            loss = tf.reduce_mean(tf.abs(target_output - prediction))
+            loss = tf.reduce_mean(tf.square(target_output - prediction))
 
 
             tf.add_to_collection('prediction', prediction)
@@ -334,7 +326,7 @@ class WaveNet(object):
                 tf.summary.scalar('l2_loss', l2_loss)
                 tf.summary.scalar('total_loss', total_loss)
 
-                return total_loss
+                return total_loss, target_output, prediction, raw_output
 
 
     def restore_model(self, tf_session, global_step=29):
@@ -374,14 +366,13 @@ class WaveNet(object):
 
     def inference(self, time_series):
         ts = self.time_series_to_batches(time_series)
-
         tf_session = tf.Session()
         self.restore_model(tf_session)
         inf_feed = {'input_sequence:0': ts[0:self.batch_size]}
         predicted, actual, MAE = tf_session.run([self.prediction, self.target_output, self.MAE], inf_feed)
-        print MAE
-        plt.plot(predicted[0][0:100], label='predicted')
-        plt.plot(actual[0][0:100], label='actual')
+        print MAE[0]
+        plt.plot(predicted[0][0:2000], label='predicted')
+        plt.plot(actual[0][:2000], label='actual')
         plt.legend()
         plt.show()
 
@@ -389,19 +380,25 @@ class WaveNet(object):
 
 
 if __name__ == '__main__':
-    sine_wave = np.sin(np.arange(0, 20000, 0.5))
-    wavenet = WaveNet(batch_size=128, sequence_length=8000)
-    wavenet.inference(sine_wave)
-    # tf_session = tf.Session()
-    # wavenet = WaveNet()
-    # x_, y_ = wavenet.create_placeholders()
-    # output = wavenet.create_network(x_)
-    # init_op = tf.global_variables_initializer()
-    # tf_session.run(init_op)
-    # print tf_session.run(tf.shape(output), feed_dict={x_: test})
+    ercot = ercot_data_interface()
+    sources_sinks = ercot.get_sources_sinks()
+    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
+    train, test, val = ercot.get_train_test_val(nn[0])
+    train = np.squeeze(train)
+    test = np.squeeze(test)
+    val = np.squeeze(val)
+    dtrain = train[24:] - train[:-24]
+    dtest = test[24:] - test[:-24]
+    dval = val[24:] - val[:-24]
+    wavenet = WaveNet(batch_size=128, sequence_length=24)
+    wavenet.train(dtrain)
+    wavenet.inference(dval)
+    wavenet.inference(dtest)
+    
 
+    # sine_wave = np.sin(np.arange(0, 20000, 0.5))
+    # wavenet = WaveNet(batch_size=128, sequence_length=8000)
+    # wavenet.train(sine_wave)
+    # wavenet.inference(sine_wave)
 
-    # ercot = ercot_data_interface()
-    # sources_sinks = ercot.get_sources_sinks()
-    # nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
-    # train, test, val = ercot.get_train_test_val(nn[0])
+    
