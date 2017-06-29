@@ -46,27 +46,9 @@ def variable_summaries(var):
         tf.summary.histogram('histogram', var)
 
 
-def time_series_to_batches(time_series, sequence_length, batch_size):
-    if sequence_length == -1:
-        x = np.reshape(time_series, (1, time_series.shape[0], 1))
-        return x
-    else:
-        num_sequences = int(np.shape(time_series)[0] / sequence_length) + 1
-        num_leftover = num_sequences*sequence_length - time_series.shape[0]
-        x = np.pad(time_series, ((0, num_leftover)), mode='constant', constant_values=(0, 0))
-        x = np.reshape(x, (num_sequences, sequence_length, 1))
-
-        num_batches = int(num_sequences / batch_size) + 1
-        num_leftover = num_batches*batch_size - num_sequences
-        x = np.pad(x, ((0, num_leftover), (0, 0), (0, 0)), mode='constant', constant_values=((0, 0), (0, 0), (0, 0)))
-        batches = np.reshape(x, (num_batches, batch_size, sequence_length, 1))
-        return batches
-
-
 class WaveNet(object):
 
-    def __init__(self, batch_size, sequence_length):
-        self.batch_size = batch_size
+    def __init__(self, sequence_length, num_condition_series=None):
         self.sequence_length = sequence_length
         self.filter_width = 2
         self.residual_channels = 32
@@ -74,9 +56,13 @@ class WaveNet(object):
         self.output_channels = 1
         self.skip_channels = 256
         self.use_biases = True
+        self.use_batch_norm = False
         self.dilations = [1, 2, 4, 8]
-        self.condition_channels = None
-        self.variables = self.create_variables()
+        self.num_condition_series = num_condition_series
+        if self.num_condition_series is None:
+            self.variables = self.create_variables()
+        else:
+            self.variables = self.create_condition_vars()
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
         self.histograms = True
 
@@ -92,49 +78,74 @@ class WaveNet(object):
         Create the TensorFlow placeholders for the model.
         """
         x_ = tf.placeholder('float', [None, self.sequence_length, 1], name='input_sequence')
+        if self.num_condition_series is None:
+            return x_
+        else:
+            condition_placeholders = []
+            for j in range(self.num_condition_series):
+                condition_placeholders.append(tf.placeholder('float', [None, self.sequence_length, 1], name='condition{}'.format(j)))
+            return condition_placeholders
 
-        return x_
 
-    def create_causal_dilation_vars(self):
-        #dimension of input series
+    def create_condition_vars(self):
         initial_channels = 1
         var = dict()
-
-        for j in range(self.condition_channels):
+        layer = dict()
+        var['condition_layer'] = list()
+        for j in range(self.num_condition_series):
             with tf.variable_scope('wavenet'):
                 with tf.variable_scope('causal_layer'):
-                    layer = dict()
                     layer['filter{}'.format(j)] = weight_variable([self.filter_width, initial_channels, self.residual_channels], 'filter{}'.format(j))
                     var['causal_layer'] = layer
 
-            var['dilated_stack{}'.format(j)] = list()
-            with tf.variable_scope('dilated_stack'):
-                for i, dilation in enumerate(self.dilations):
-                    with tf.variable_scope('condition{}layer{}'.format(j,i)):
-                        current = dict()
-                        current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter')
-                        current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense')
-                        current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip')
+            
+            with tf.variable_scope('conditional_dilation'):
+                current = dict()
+                current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter')
+                current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense')
+                current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip')
 
 
-                        if self.use_biases:
-                            current['filter_bias'] = bias_variable([self.dilation_channels], 'filter_bias')
-                            current['dense_bias'] = bias_variable([self.residual_channels], 'dense_bias')
-                            current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
+                if self.use_biases:
+                    current['filter_bias'] = bias_variable([self.dilation_channels], 'filter_bias')
+                    current['dense_bias'] = bias_variable([self.residual_channels], 'dense_bias')
+                    current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
-                        var['dilated_stack{}'.format(j)].append(current)
+                if self.use_batch_norm:
+                    current_receptive_field = 2
+                    current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
+                    current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
 
-        return var
+                var['condition_layer'].append(current)
+
+        var['dilated_stack'] = list()        
+        for i, dilation in enumerate(self.dilations):
+            with tf.variable_scope('layer{}'.format(i+1)):
+                current = dict()
+                current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter')
+                current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense')
+                current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip')
 
 
-    def create_postprocessing_vars(self):
+                if self.use_biases:
+                    current['filter_bias'] = bias_variable([self.dilation_channels], 'filter_bias')
+                    current['dense_bias'] = bias_variable([self.residual_channels], 'dense_bias')
+                    current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
+
+                if self.use_batch_norm:
+                    current_receptive_field = np.sum(self.dilations[:i]) + 2
+                    current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
+                    current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
+
+                var['dilated_stack'].append(current)
+
         with tf.variable_scope('postprocessing'):
             current = dict()
             current['postprocess'] = weight_variable([1, self.skip_channels, self.output_channels], 'postprocess')
             if self.use_biases:
                 current['postprocess_bias'] = bias_variable([self.output_channels], 'postprocess_bias')
             var['postprocessing'] = current
-
+        return var
 
 
     def create_variables(self):
@@ -152,31 +163,34 @@ class WaveNet(object):
                 var['causal_layer'] = layer
 
                 
-
         var['dilated_stack'] = list()
         with tf.variable_scope('dilated_stack'):
             for i, dilation in enumerate(self.dilations):
                 with tf.variable_scope('layer{}'.format(i)):
                     current = dict()
                     current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter')
-                    current['gate'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'gate')
                     current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense')
                     current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip')
 
 
                     if self.use_biases:
                         current['filter_bias'] = bias_variable([self.dilation_channels], 'filter_bias')
-                        current['gate_bias'] = bias_variable([self.dilation_channels], 'gate_bias')
                         current['dense_bias'] = bias_variable([self.residual_channels], 'dense_bias')
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
+
+                    if self.use_batch_norm:
+                        current_receptive_field = np.sum(self.dilations[:i]) + 2
+                        current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
+                        current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
+                        
 
                     var['dilated_stack'].append(current)
 
         with tf.variable_scope('postprocessing'):
                 current = dict()
-                current['postprocess2'] = weight_variable([1, self.skip_channels, self.output_channels], 'postprocess2')
+                current['postprocess'] = weight_variable([1, self.skip_channels, self.output_channels], 'postprocess')
                 if self.use_biases:
-                    current['postprocess2_bias'] = bias_variable([self.output_channels], 'postprocess2_bias')
+                    current['postprocess_bias'] = bias_variable([self.output_channels], 'postprocess_bias')
                 var['postprocessing'] = current
 
         return var
@@ -186,18 +200,18 @@ class WaveNet(object):
 
         The layer can change the number of channels.
         '''
-        with tf.name_scope('causal_layer'):
-            
-            # BN_preactivate = tf.divide(tf.matmul(BN_scaler, input_batch - batch_mean),batch_var) + BN_offset
-            # BN_preactivate = tf.nn.batch_normalization(input_batch, batch_mean, batch_var, BN_offset, BN_scaler, 0.001)
-            weights_filter = self.variables['causal_layer']['filter']
-            preactivate = causal_conv(input_batch, weights_filter, 1)
-            # BN_scaler = scale_variable([self.batch_size, self.sequence_length-2, self.residual_channels], 'BN_scaler')
-            # BN_offset = offset_variable([self.batch_size, self.sequence_length-2, self.residual_channels], 'BN_offset')
-            # batch_mean, batch_var = tf.nn.moments(preactivate, [0])
-            # batch_normalized = tf.nn.batch_normalization(preactivate, batch_mean, batch_var, BN_offset, BN_scaler, 0.001)
-            return preactivate
-
+        if self.num_condition_series is None:
+            with tf.name_scope('causal_layer'):
+                weights_filter = self.variables['causal_layer']['filter']
+                output = causal_conv(input_batch, weights_filter, 1)
+                return output
+        else:
+            output = []
+            for j in range(self.num_condition_series):
+                with tf.name_scope('causal_layer{}'.format(j)):
+                    weights_filter = self.variables['causal_layer']['filter{}'.format(j)]
+                    output.append(causal_conv(input_batch[j], weights_filter, 1))
+            return output
 
     def _create_dilation_layer(self, input_batch, layer_index, dilation, output_width):
         '''Creates a single causal dilated convolution layer.
@@ -221,17 +235,43 @@ class WaveNet(object):
         are omitted due to the limits of ASCII art.
 
         '''
-        variables = self.variables['dilated_stack'][layer_index]
+        if self.num_condition_series is None or layer_index > 0:
+            variables = self.variables['dilated_stack'][layer_index]
+            weights_filter = variables['filter']
 
+            if self.use_batch_norm:
+                filter_scaler = variables['filter_scale']
+                filter_offset = variables['filter_offset']
+                batch_mean, batch_var = tf.nn.moments(input_batch, [0])
+                batch_normalized = tf.nn.batch_normalization(input_batch, batch_mean, batch_var, filter_offset, filter_scaler, 0.001)
+                conv_filter = causal_conv(batch_normalized, weights_filter, dilation)
+            else:
+                conv_filter = causal_conv(input_batch, weights_filter, dilation)
+            
 
-        weights_filter = variables['filter']
+            if self.use_biases:
+                filter_bias = variables['filter_bias']
+                conv_filter = tf.add(conv_filter, filter_bias)
+        else:
+            conv_filters = []
+            for j in range(self.num_condition_series):
+                variables = self.variables['condition_layer'][j]
+                weights_filter = variables['filter']
 
-        conv_filter = causal_conv(input_batch, weights_filter, dilation)
+                if self.use_batch_norm:
+                    filter_scaler = variables['filter_scale']
+                    filter_offset = variables['filter_offset']
+                    batch_mean, batch_var = tf.nn.moments(input_batch[j], [0])
+                    batch_normalized = tf.nn.batch_normalization(input_batch[j], batch_mean, batch_var, filter_offset, filter_scaler, 0.001)
+                    conv_filter = causal_conv(batch_normalized, weights_filter, dilation)
+                else:
+                    conv_filter = causal_conv(input_batch[j], weights_filter, dilation)
 
-        if self.use_biases:
-            filter_bias = variables['filter_bias']
-            conv_filter = tf.add(conv_filter, filter_bias)
-
+                if self.use_biases:
+                    filter_bias = variables['filter_bias']
+                    conv_filter = tf.add(conv_filter, filter_bias)
+                conv_filters.append(conv_filter)
+            conv_filter = sum(conv_filters)
 
         # The 1x1 conv to produce the residual output
         out = tf.nn.relu(conv_filter)
@@ -258,15 +298,25 @@ class WaveNet(object):
             tf.summary.histogram(layer + '_filter', weights_filter)
             tf.summary.histogram(layer + '_dense', weights_dense)
             tf.summary.histogram(layer + '_skip', weights_skip)
+            if self.use_batch_norm:
+                tf.summary.histogram(layer + '_BNscaler', filter_scaler)
+                tf.summary.histogram(layer + '_BNoffset', filter_offset)
             if self.use_biases:
                 tf.summary.histogram(layer + '_biases_filter', filter_bias)
                 tf.summary.histogram(layer + '_biases_dense', dense_bias)
                 tf.summary.histogram(layer + '_biases_skip', skip_bias)
 
-        input_cut = tf.shape(input_batch)[1] - tf.shape(transformed)[1]
-        input_batch = tf.slice(input_batch, [0, input_cut, 0], [-1, -1, -1])
+        if self.num_condition_series is None or layer_index > 0:
+            input_cut = tf.shape(input_batch)[1] - tf.shape(transformed)[1]
+            input_batch = tf.slice(input_batch, [0, input_cut, 0], [-1, -1, -1])
+            return skip_contribution, input_batch + transformed
 
-        return skip_contribution, input_batch + transformed
+        else:
+            for j in range(self.num_condition_series):
+                input_cut = tf.shape(input_batch[j])[1] - tf.shape(transformed)[1]
+                condition = tf.slice(input_batch[j], [0, input_cut, 0], [-1, -1, -1])
+                transformed = transformed + condition
+            return skip_contribution, transformed
 
     def create_network(self, input_batch):
         outputs = []
@@ -277,7 +327,10 @@ class WaveNet(object):
 
         current_layer = self._create_causal_layer(current_layer)
 
-        output_width = tf.shape(input_batch)[1] - self.receptive_field + 1
+        if self.num_condition_series is None:
+            output_width = tf.shape(input_batch)[1] - self.receptive_field + 1
+        else:
+            output_width = tf.shape(input_batch[0])[1] - self.receptive_field + 1
 
 
         # Add all defined dilation layers.
@@ -289,14 +342,14 @@ class WaveNet(object):
 
         with tf.name_scope('postprocessing'):
             #Linear layer
-            w2 = self.variables['postprocessing']['postprocess2']
+            w2 = self.variables['postprocessing']['postprocess']
             if self.use_biases:
-                b2 = self.variables['postprocessing']['postprocess2_bias']
+                b2 = self.variables['postprocessing']['postprocess_bias']
 
             if self.histograms:
-                tf.summary.histogram('postprocess2_weights', w2)
+                tf.summary.histogram('postprocess_weights', w2)
                 if self.use_biases:
-                    tf.summary.histogram('postprocess2_biases', b2)
+                    tf.summary.histogram('postprocess_biases', b2)
 
             # We skip connections from the outputs of each layer, adding them
             # all up here.
@@ -308,26 +361,42 @@ class WaveNet(object):
 
 
     def time_series_to_batches(self, time_series):
-        if self.sequence_length == -1:
-            x = np.reshape(time_series, (1, time_series.shape[0], 1))
-            return x
-        else:
+        if self.num_condition_series is None:
             num_sequences = int(np.shape(time_series)[0] / self.sequence_length) + 1
             num_leftover = num_sequences*self.sequence_length - time_series.shape[0]
             x = np.pad(time_series, ((0, num_leftover)), mode='constant', constant_values=(0, 0))
             batches = np.reshape(x, (num_sequences, self.sequence_length, 1))
             return batches
+        else:
+            batches = []
+            for j in range(self.num_condition_series):
+                num_sequences = int(np.shape(time_series[:, j])[0] / self.sequence_length) + 1
+                num_leftover = num_sequences*self.sequence_length - time_series[:, j].shape[0]
+                x = np.pad(time_series[:, j], ((0, num_leftover)), mode='constant', constant_values=(0, 0))
+                batches.append(np.reshape(x, (num_sequences, self.sequence_length, 1)))
+            return np.array(batches)
 
 
-    def loss(self, input_batch, l2_regularization_strength=0.01):
+    def loss(self, input_batch, l2_regularization_strength=False):
         # Cut off the last sample of network input to preserve causality.
-        batch_size = tf.shape(input_batch)[0]
-        encoded = tf.reshape(input_batch, [batch_size, -1, 1])
-        network_input = tf.reshape(input_batch, [batch_size, -1, 1])
-        network_input_width = tf.shape(network_input)[1] - 1
-        network_input = tf.slice(network_input, [0, 0, 0], [-1, network_input_width, -1])
+        if self.num_condition_series is None:
+            batch_size = tf.shape(input_batch)[0]
+            encoded = tf.reshape(input_batch, [batch_size, -1, 1])
+            network_input = tf.reshape(input_batch, [batch_size, -1, 1])
+            network_input_width = tf.shape(network_input)[1] - 1
+            network_input = tf.slice(network_input, [0, 0, 0], [-1, network_input_width, -1])
+            raw_output = self.create_network(network_input)
+        else:
+            network_input = []
+            batch_size = tf.shape(input_batch[0])[0]
+            encoded = tf.reshape(input_batch[0], [batch_size, -1, 1])
+            for j in range(self.num_condition_series):
+                batch_size = tf.shape(input_batch[j])[0]
+                condition_input = tf.reshape(input_batch[j], [batch_size, -1, 1])
+                network_input_width = tf.shape(condition_input)[1] - 1
+                network_input.append(tf.slice(condition_input, [0, 0, 0], [-1, network_input_width, -1]))
         
-        raw_output = self.create_network(network_input)
+            raw_output = self.create_network(network_input)
 
         with tf.name_scope('loss'):
             # Cut off the samples corresponding to the receptive field
@@ -362,7 +431,7 @@ class WaveNet(object):
                 return total_loss, target_output, prediction, raw_output
 
 
-    def restore_model(self, tf_session, global_step=29):
+    def restore_model(self, tf_session, global_step=49):
         new_saver = tf.train.import_meta_graph(SAVE_PATH + '-' + str(global_step) + '.meta')
         new_saver.restore(tf_session, tf.train.latest_checkpoint(LOG_DIR))
         self.prediction = tf.get_collection('prediction')
@@ -370,7 +439,7 @@ class WaveNet(object):
         self.MAE = tf.get_collection('MAE')
 
 
-    def train(self, time_series, epochs=30):
+    def train(self, time_series, batch_size, epochs=50):
 
         tf_session = tf.Session()
         x_ = self.create_placeholders()
@@ -384,55 +453,85 @@ class WaveNet(object):
 
 
         batches = self.time_series_to_batches(time_series)
-        for e in range(epochs):
-            for i in np.arange(0, batches.shape[0], self.batch_size):
-                tr_feed = {x_: batches[i:i+self.batch_size, :, :]}
-                tf_session.run(train_step, feed_dict=tr_feed)
-                
-            tr_feed = {x_: batches[0:0+self.batch_size, :, :]}
-            print tf_session.run(self.MAE, feed_dict=tr_feed)
-            predicted, actual, raw_output = tf_session.run([self.prediction, self.target_output, self.raw_output], feed_dict=tr_feed)
-            print raw_output.shape
-            tf_saver.save(tf_session, SAVE_PATH, global_step=e)
-            summary_train = tf_session.run(merged, feed_dict=tr_feed)
-            train_writer.add_summary(summary_train, e)
+        if self.num_condition_series is None:
+            for e in range(epochs):
+                for i in np.arange(0, batches.shape[0], batch_size):
+                    tr_feed = {x_: batches[i:i + batch_size, :, :]}
+                    tf_session.run(train_step, feed_dict=tr_feed)
+                    
+                tr_feed = {x_: batches[0:0 + batch_size, :, :]}
+                print tf_session.run(self.MAE, feed_dict=tr_feed)
+                predicted, actual, raw_output = tf_session.run([self.prediction, self.target_output, self.raw_output], feed_dict=tr_feed)
+                tf_saver.save(tf_session, SAVE_PATH, global_step=e)
+                summary_train = tf_session.run(merged, feed_dict=tr_feed)
+                train_writer.add_summary(summary_train, e)
+        else:
+            for e in range(epochs):
+                for i in np.arange(0, batches.shape[1], batch_size):
+                    tr_feed = {}
+                    for j in range(self.num_condition_series):
+                        tr_feed[x_[j]] = batches[j, i:i + batch_size, :, :]
+                    tf_session.run(train_step, feed_dict=tr_feed)
+                    
+                for j in range(self.num_condition_series):
+                        tr_feed[x_[j]] = batches[j, 0:0 + batch_size, :, :]
+                print tf_session.run(self.MAE, feed_dict=tr_feed)
+                predicted, actual, raw_output = tf_session.run([self.prediction, self.target_output, self.raw_output], feed_dict=tr_feed)
+                tf_saver.save(tf_session, SAVE_PATH, global_step=e)
+                summary_train = tf_session.run(merged, feed_dict=tr_feed)
+                train_writer.add_summary(summary_train, e)
 
 
     def inference(self, time_series):
-        ts = self.time_series_to_batches(time_series)
+        batches = self.time_series_to_batches(time_series)
         tf_session = tf.Session()
         self.restore_model(tf_session)
-        inf_feed = {'input_sequence:0': ts[0:self.batch_size]}
-        predicted, actual, MAE = tf_session.run([self.prediction, self.target_output, self.MAE], inf_feed)
-        print MAE[0]
-        plt.plot(predicted[0][0:2000], label='predicted')
-        plt.plot(actual[0][:2000], label='actual')
-        plt.legend()
-        plt.show()
+        if self.num_condition_series is None:
+            inf_feed = {'input_sequence:0': batches[0:128]}
+            predicted, actual, MAE = tf_session.run([self.prediction, self.target_output, self.MAE], inf_feed)
+            print MAE[0]
+            plt.plot(predicted[0][0:2000], label='predicted')
+            plt.plot(actual[0][:2000], label='actual')
+            plt.legend()
+            plt.show()
+        else:
+            inf_feed = {}
+            for j in np.arange(0, self.num_condition_series):
+                inf_feed['condition{}:0'.format(j)] = batches[j, 0:128, :, :]
+            predicted, actual, MAE = tf_session.run([self.prediction, self.target_output, self.MAE], inf_feed)
+            print MAE[0]
+            plt.plot(predicted[0][0:2000], label='predicted')
+            plt.plot(actual[0][:2000], label='actual')
+            plt.legend()
+            plt.show()
 
-
+def time_series_to_batches(time_series, num_condition_series, sequence_length):
+        if num_condition_series is None:
+            num_sequences = int(np.shape(time_series)[0] / sequence_length) + 1
+            num_leftover = num_sequences*sequence_length - time_series.shape[0]
+            x = np.pad(time_series, ((0, num_leftover)), mode='constant', constant_values=(0, 0))
+            batches = np.reshape(x, (num_sequences, sequence_length, 1))
+            return batches
+        else:
+            batches = []
+            for j in range(num_condition_series):
+                num_sequences = int(np.shape(time_series[:, j])[0] / sequence_length) + 1
+                num_leftover = num_sequences*sequence_length - time_series[:, j].shape[0]
+                x = np.pad(time_series[:, j], ((0, num_leftover)), mode='constant', constant_values=(0, 0))
+                batches.append(np.reshape(x, (num_sequences, sequence_length, 1)))
+            return np.array(batches)
 
 
 if __name__ == '__main__':
     ercot = ercot_data_interface()
     sources_sinks = ercot.get_sources_sinks()
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
-    train, test, val = ercot.get_train_test_val(nn[0])
-    train = np.squeeze(train)
-    test = np.squeeze(test)
-    val = np.squeeze(val)
-    dtrain = train[24:] - train[:-24]
-    dtest = test[24:] - test[:-24]
-    dval = val[24:] - val[:-24]
-    wavenet = WaveNet(batch_size=128, sequence_length=24)
-    wavenet.train(dtrain)
-    wavenet.inference(dval)
-    wavenet.inference(dtest)
-    
+    prices1 = ercot.query_prices(nn, '2011-01-01', '2015-01-01').as_matrix()
+    prices2 = ercot.query_prices(nn, '2015-01-01', '2016-5-23').as_matrix()
+    # prices3 = np.squeeze(ercot.query_prices(nn[0], '2011-01-01', '2015-01-01').as_matrix())
+    # prices4 = np.squeeze(ercot.query_prices(nn[0], '2015-01-01', '2016-5-23').as_matrix())
 
-    # sine_wave = np.sin(np.arange(0, 20000, 0.5))
-    # wavenet = WaveNet(batch_size=128, sequence_length=8000)
-    # wavenet.train(sine_wave)
-    # wavenet.inference(sine_wave)
-
+    wavenet = WaveNet(sequence_length=8000, num_condition_series=prices1.shape[1])
+    wavenet.train(prices1, batch_size=4)
+    wavenet.inference(prices2)
     
