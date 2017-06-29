@@ -95,8 +95,50 @@ class WaveNet(object):
 
         return x_
 
+    def create_causal_dilation_vars(self):
+        #dimension of input series
+        initial_channels = 1
+        var = dict()
+
+        for j in range(self.condition_channels):
+            with tf.variable_scope('wavenet'):
+                with tf.variable_scope('causal_layer'):
+                    layer = dict()
+                    layer['filter{}'.format(j)] = weight_variable([self.filter_width, initial_channels, self.residual_channels], 'filter{}'.format(j))
+                    var['causal_layer'] = layer
+
+            var['dilated_stack{}'.format(j)] = list()
+            with tf.variable_scope('dilated_stack'):
+                for i, dilation in enumerate(self.dilations):
+                    with tf.variable_scope('condition{}layer{}'.format(j,i)):
+                        current = dict()
+                        current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter')
+                        current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense')
+                        current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip')
+
+
+                        if self.use_biases:
+                            current['filter_bias'] = bias_variable([self.dilation_channels], 'filter_bias')
+                            current['dense_bias'] = bias_variable([self.residual_channels], 'dense_bias')
+                            current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
+
+                        var['dilated_stack{}'.format(j)].append(current)
+
+        return var
+
+
+    def create_postprocessing_vars(self):
+        with tf.variable_scope('postprocessing'):
+            current = dict()
+            current['postprocess'] = weight_variable([1, self.skip_channels, self.output_channels], 'postprocess')
+            if self.use_biases:
+                current['postprocess_bias'] = bias_variable([self.output_channels], 'postprocess_bias')
+            var['postprocessing'] = current
+
+
+
     def create_variables(self):
-        '''This function creates all variables used by the network.
+        '''This function creates all variables used by the network in the autoregressive case.
         This allows us to share them between multiple calls to the loss
         function and generation function.'''
         # scalar (univariate) prediction
@@ -109,6 +151,7 @@ class WaveNet(object):
                 layer['filter'] = weight_variable([self.filter_width, initial_channels, self.residual_channels], 'filter')
                 var['causal_layer'] = layer
 
+                
 
         var['dilated_stack'] = list()
         with tf.variable_scope('dilated_stack'):
@@ -144,8 +187,16 @@ class WaveNet(object):
         The layer can change the number of channels.
         '''
         with tf.name_scope('causal_layer'):
+            
+            # BN_preactivate = tf.divide(tf.matmul(BN_scaler, input_batch - batch_mean),batch_var) + BN_offset
+            # BN_preactivate = tf.nn.batch_normalization(input_batch, batch_mean, batch_var, BN_offset, BN_scaler, 0.001)
             weights_filter = self.variables['causal_layer']['filter']
-            return causal_conv(input_batch, weights_filter, 1)
+            preactivate = causal_conv(input_batch, weights_filter, 1)
+            # BN_scaler = scale_variable([self.batch_size, self.sequence_length-2, self.residual_channels], 'BN_scaler')
+            # BN_offset = offset_variable([self.batch_size, self.sequence_length-2, self.residual_channels], 'BN_offset')
+            # batch_mean, batch_var = tf.nn.moments(preactivate, [0])
+            # batch_normalized = tf.nn.batch_normalization(preactivate, batch_mean, batch_var, BN_offset, BN_scaler, 0.001)
+            return preactivate
 
 
     def _create_dilation_layer(self, input_batch, layer_index, dilation, output_width):
@@ -155,43 +206,32 @@ class WaveNet(object):
              input_batch: Input to the dilation layer.
              layer_index: Integer indicating which layer this is.
              dilation: Integer specifying the dilation size.
-             global_conditioning_batch: Tensor containing the global data upon
-                 which the output is to be conditioned upon. Shape:
-                 [batch size, 1, channels]. The 1 is for the axis
-                 corresponding to time so that the result is broadcast to
-                 all time steps.
-
-        The layer contains a gated filter that connects to dense output
-        and to a skip connection:
-
-               |-> [gate]   -|        |-> 1x1 conv -> skip output
-               |             |-> (*) -|
-        input -|-> [filter] -|        |-> 1x1 conv -|
-               |                                    |-> (+) -> residual output
-               |------------------------------------|
+                 |-----------------------------------------------------------------------|
+                 |                                                                       |
+        condition|-> [BNx]->[filterx] -|           |-> 1x1 conv -> skip output           |
+                 |                     |-> (+)-ReLu|----------------------------------->(+)-> 1x1 conv -> residual output
+        input -  |-> [BN0]->[filter0] -|                                                 |
+                 |                                                                       |
+                 |-----------------------------------------------------------------------|
 
         sum(skip_outputs) -> 1x1 conv --> output
 
-        Where `[gate]` and `[filter]` are causal convolutions with a
-        non-linear activation at the output. Biases and global conditioning
+        Where `[filter]` are causal convolutions with a
+        ReLu at the output. Biases and global conditioning
         are omitted due to the limits of ASCII art.
 
         '''
         variables = self.variables['dilated_stack'][layer_index]
 
+
         weights_filter = variables['filter']
-        weights_gate = variables['gate']
 
         conv_filter = causal_conv(input_batch, weights_filter, dilation)
-        conv_gate = causal_conv(input_batch, weights_gate, dilation)
 
         if self.use_biases:
             filter_bias = variables['filter_bias']
-            gate_bias = variables['gate_bias']
             conv_filter = tf.add(conv_filter, filter_bias)
-            conv_gate = tf.add(conv_gate, gate_bias)
 
-        # out = tf.tanh(conv_filter) * tf.sigmoid(conv_gate)
 
         # The 1x1 conv to produce the residual output
         out = tf.nn.relu(conv_filter)
@@ -216,12 +256,10 @@ class WaveNet(object):
         if self.histograms:
             layer = 'layer{}'.format(layer_index)
             tf.summary.histogram(layer + '_filter', weights_filter)
-            tf.summary.histogram(layer + '_gate', weights_gate)
             tf.summary.histogram(layer + '_dense', weights_dense)
             tf.summary.histogram(layer + '_skip', weights_skip)
             if self.use_biases:
                 tf.summary.histogram(layer + '_biases_filter', filter_bias)
-                tf.summary.histogram(layer + '_biases_gate', gate_bias)
                 tf.summary.histogram(layer + '_biases_dense', dense_bias)
                 tf.summary.histogram(layer + '_biases_skip', skip_bias)
 
@@ -263,14 +301,9 @@ class WaveNet(object):
             # We skip connections from the outputs of each layer, adding them
             # all up here.
             total = sum(outputs)
-            # transformed1 = tf.nn.relu(total)
             conv1 = tf.nn.conv1d(total, w2, stride=1, padding="SAME")
             if self.use_biases:
                 conv1 = tf.add(conv1, b2)
-            # transformed2 = tf.nn.relu(conv1)
-            # conv2 = tf.nn.conv1d(transformed2, w2, stride=1, padding="SAME")
-            # if self.use_biases:
-            #     conv2 = tf.add(conv2, b2)
             return conv1
 
 
@@ -305,7 +338,7 @@ class WaveNet(object):
 
             
             #Mean Absolte Error
-            loss = tf.reduce_mean(tf.square(target_output - prediction))
+            loss = tf.reduce_mean(tf.abs(target_output - prediction))
 
 
             tf.add_to_collection('prediction', prediction)
@@ -359,6 +392,7 @@ class WaveNet(object):
             tr_feed = {x_: batches[0:0+self.batch_size, :, :]}
             print tf_session.run(self.MAE, feed_dict=tr_feed)
             predicted, actual, raw_output = tf_session.run([self.prediction, self.target_output, self.raw_output], feed_dict=tr_feed)
+            print raw_output.shape
             tf_saver.save(tf_session, SAVE_PATH, global_step=e)
             summary_train = tf_session.run(merged, feed_dict=tr_feed)
             train_writer.add_summary(summary_train, e)
