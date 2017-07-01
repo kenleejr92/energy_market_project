@@ -8,10 +8,10 @@ import pandas as pd
 import pymysql
 from datetime import datetime
 import re
-#import holidays
 import calendar
 import matplotlib.pyplot as plt
 from sets import Set
+from sklearn.preprocessing import MinMaxScaler
 
 HOST = 'localhost'
 USER = 'root'
@@ -44,6 +44,7 @@ def weekday_of_date(date):
 class ercot_data_interface(object):
 
     def __init__(self, password=PASSWORD):
+        self.train_fraction = 0.8
         self.connection = pymysql.connect(host=HOST, user=USER, password=password, db=DB, port=3306,  cursorclass=pymysql.cursors.Cursor)
         self.all_nodes = []
         self.all_nodes_dict = {}
@@ -134,7 +135,13 @@ class ercot_data_interface(object):
                 for nodex in self.all_nodes:
                     if re.search(pattern2, nodex):
                         nn.append(nodex)
-            return [node] + nn
+            for i, n in enumerate(nn):
+                if n not in self.all_nodes:
+                    del nn[i]
+            if node not in self.all_nodes:
+                return None
+            else:
+                return [node] + nn
 
     def get_CRR_nodes(self):
         all_nodes = []
@@ -161,27 +168,56 @@ class ercot_data_interface(object):
             return CRR_nodes
 
 
-    def get_train_test_val(self, node):
-        X = self.query_prices(node, '2011-01-01', '2016-5-23').as_matrix()
-        train = X[:3*24*7*52]
-        val = X[3*24*7*52:int(3.5*24*7*52)]
-        test = X[int(3.5*24*7*52):]
+    def get_train_test(self, node, include_seasonal_vectors = True):
+        X = self.query_prices(node, '2011-01-01', '2016-5-23')
+        datetimes = X.index
+        X = X.as_matrix()
+        if include_seasonal_vectors:
+            hours = []
+            months = []
+            weekdays = []
+            for dt in datetimes:
+                dt = dt.to_pydatetime()
+                weekday = calendar.weekday(dt.year, dt.month, dt.day)
+                hours.append(dt.hour)
+                months.append(dt.month)
+                weekdays.append(weekday)
+            hours = np.array(hours).reshape(-1, 1)
+            months = np.array(months).reshape(-1, 1)
+            weekdays = np.array(weekdays).reshape(-1, 1)
+            X = np.hstack((X, hours, months, weekdays))
+        else:
+            train_stop = int(self.train_fraction*X.shape[0])
+            train = X[:train_stop, :]
+            test = X[train_stop:, :]
+        return train, test
 
-        return train, test, val
 
 
 if __name__ == '__main__':
     ercot = ercot_data_interface()
     sources_sinks = ercot.get_sources_sinks()
     #source_sinks[20] gave an error
-    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
-    # df = ercot.query_prices(nn, '2011-01-01', '2016-12-31')
-    train, test, val = ercot.get_train_test_val(nn[0])
-    print train.shape
-    plt.plot(train, label='train')
-    plt.plot(test, label='test')
-    plt.plot(val, label='val')
-    plt.legend()
-    plt.show()
+    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
+    if nn == None:
+        print 'Prices not found'
+    else:
+        train, test = ercot.get_train_test(nn[0], include_seasonal_vectors=False)
+        scaler = MinMaxScaler((-1,1))
+        train = scaler.fit_transform(train)
+        mu = 1024
+        F = np.sign(train)*np.log(1 + mu*np.abs(train))/np.log(1 + mu)
+        F = ((F + 1) / 2 * mu + 0.5).astype('int')
+        print F
+        plt.plot(F)
+        plt.show()
+    # plt.plot(train)
+    # plt.show()
+    # print train.shape
+    # plt.plot(train, label='train')
+    # plt.plot(test, label='test')
+    # plt.plot(val, label='val')
+    # plt.legend()
+    # plt.show()
 
 
