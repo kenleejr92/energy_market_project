@@ -11,7 +11,7 @@ import re
 import calendar
 import matplotlib.pyplot as plt
 from sets import Set
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 HOST = 'localhost'
 USER = 'root'
@@ -48,6 +48,7 @@ class ercot_data_interface(object):
         self.connection = pymysql.connect(host=HOST, user=USER, password=password, db=DB, port=3306,  cursorclass=pymysql.cursors.Cursor)
         self.all_nodes = []
         self.all_nodes_dict = {}
+        self.standard_scaler = None
         with self.connection.cursor() as cursor:                      
             for i in range(0,13):
                 cursor.execute("""SHOW columns FROM DAM_LMP%s""" % i)
@@ -168,7 +169,7 @@ class ercot_data_interface(object):
             return CRR_nodes
 
 
-    def get_train_test(self, node, include_seasonal_vectors = True):
+    def get_train_test(self, node, normalize=True, include_seasonal_vectors=True):
         X = self.query_prices(node, '2011-01-01', '2016-5-23')
         datetimes = X.index
         X = X.as_matrix()
@@ -186,10 +187,13 @@ class ercot_data_interface(object):
             months = np.array(months).reshape(-1, 1)
             weekdays = np.array(weekdays).reshape(-1, 1)
             X = np.hstack((X, hours, months, weekdays))
-        else:
-            train_stop = int(self.train_fraction*X.shape[0])
-            train = X[:train_stop, :]
-            test = X[train_stop:, :]
+        train_stop = int(self.train_fraction*X.shape[0])
+        train = X[:train_stop]
+        test = X[train_stop:]
+        if normalize == True:
+                self.standard_scaler = StandardScaler()
+                train = self.standard_scaler.fit_transform(train)
+                test = self.standard_scaler.transform(test)
         return train, test
 
 
@@ -203,14 +207,16 @@ if __name__ == '__main__':
         print 'Prices not found'
     else:
         train, test = ercot.get_train_test(nn[0], include_seasonal_vectors=False)
-        scaler = MinMaxScaler((-1,1))
-        train = scaler.fit_transform(train)
-        mu = 1024
-        F = np.sign(train)*np.log(1 + mu*np.abs(train))/np.log(1 + mu)
-        F = ((F + 1) / 2 * mu + 0.5).astype('int')
-        print F
-        plt.plot(F)
+        plt.plot(train)
         plt.show()
+        # scaler = MinMaxScaler((-1,1))
+        # train = scaler.fit_transform(train)
+        # mu = 1024
+        # F = np.sign(train)*np.log(1 + mu*np.abs(train))/np.log(1 + mu)
+        # F = ((F + 1) / 2 * mu + 0.5).astype('int')
+        # print F
+        # plt.plot(F)
+        # plt.show()
     # plt.plot(train)
     # plt.show()
     # print train.shape

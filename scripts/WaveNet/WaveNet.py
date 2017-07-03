@@ -62,24 +62,19 @@ class WaveNet(object):
     self.num_condition_series: how many series to condition on
     self.histograms: record histograms
     '''
-    def __init__(self, sequence_length, output_channels=1, num_condition_series=None):
+    def __init__(self, MIMO=False):
         self.train_fraction = 0.8
-        self.sequence_length = sequence_length
-        self.initial_filter_width = 10
+        self.initial_filter_width = 2
         self.filter_width = 2
         self.residual_channels = 32
         self.dilation_channels = 32
-        self.output_channels = 1
+        self.MIMO = MIMO
         self.skip_channels = 256
         self.use_biases = True
         self.use_batch_norm = False
-        self.dilations = [1, 2, 4, 8]
-        self.num_condition_series = num_condition_series
-        if self.num_condition_series is None:
-            self.variables = self.create_variables()
-        else:
-            self.variables = self.create_condition_vars()
+        self.dilations = [1, 2, 4, 8, 16, 32, 64, 128]
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
+        self.sequence_length = self.receptive_field + 1
         self.histograms = True
 
 
@@ -170,7 +165,7 @@ class WaveNet(object):
         This allows us to share them between multiple calls to the loss
         function and generation function.'''
         # scalar (univariate) prediction
-        initial_channels = 1
+        initial_channels = self.output_channels
         var = dict()
 
         with tf.variable_scope('causal_layer'):
@@ -334,7 +329,12 @@ class WaveNet(object):
                 transformed = transformed + condition
             return skip_contribution, transformed
 
+
     def create_network(self, input_batch):
+        if self.num_condition_series is None:
+            self.variables = self.create_variables()
+        else:
+            self.variables = self.create_condition_vars()
         outputs = []
         current_layer = input_batch
 
@@ -376,32 +376,51 @@ class WaveNet(object):
             return conv1
 
 
-    def time_series_to_batches(self, time_series):
+    def time_series_to_sequences(self, time_series, parallel=True):
         #TO DO: reshape for output channels
         if self.num_condition_series is None:
-            if self.output_channels > 1:
-                pass
-            num_sequences = int(np.shape(time_series)[0] / self.sequence_length) + 1
-            num_leftover = num_sequences*self.sequence_length - time_series.shape[0]
-            x = np.pad(time_series, ((0, num_leftover)), mode='constant', constant_values=(0, 0))
-            batches = np.reshape(x, (num_sequences, self.sequence_length, 1))
-            return batches
+            if parallel == True:
+                num_sequences = int(np.shape(time_series)[0] / self.sequence_length) + 1
+                num_leftover = num_sequences*self.sequence_length - time_series.shape[0]
+                x = np.pad(time_series, ((0, num_leftover), (0, 0)), mode='constant', constant_values=((0, 0), (0, 0)))
+                sequences = np.reshape(x, (num_sequences, self.sequence_length, self.output_channels))
+            else:
+                sequences = []
+                for i in range(time_series.shape[0]):
+                    sequences.append(time_series[i:i+self.sequence_length])
+                    if i + self.sequence_length >= time_series.shape[0]:
+                        break
+                sequences = np.array(sequences)
+            return sequences
         else:
-            batches = []
-            for j in range(self.num_condition_series):
-                num_sequences = int(np.shape(time_series[:, j])[0] / self.sequence_length) + 1
-                num_leftover = num_sequences*self.sequence_length - time_series[:, j].shape[0]
-                x = np.pad(time_series[:, j], ((0, num_leftover)), mode='constant', constant_values=(0, 0))
-                batches.append(np.reshape(x, (num_sequences, self.sequence_length, 1)))
-            return np.array(batches)
+            sequences = []
+            if parallel == True:
+                for j in range(self.num_condition_series):
+                    num_sequences = int(np.shape(time_series[:, j])[0] / self.sequence_length) + 1
+                    num_leftover = num_sequences*self.sequence_length - time_series[:, j].shape[0]
+                    x = np.pad(time_series[:, j], ((0, num_leftover)), mode='constant', constant_values=(0, 0))
+                    sequences.append(np.reshape(x, (num_sequences, self.sequence_length, 1)))
+                sequences = np.array(sequences)
+            else:
+                for j in range(self.num_condition_series):
+                    seqs = []
+                    for i in range(time_series.shape[0]):
+                        seqs.append(time_series[i:i+self.sequence_length, j])
+                        if i + self.sequence_length >= time_series.shape[0]:
+                            break
+                    seqs = np.array(seqs)
+                    sequences.append(seqs)
+                sequences = np.array(sequences)
+                sequences = np.expand_dims(sequences, sequences.shape[-1])
+            return sequences
 
 
     def loss(self, input_batch, l2_regularization_strength=0.01):
         # Cut off the last sample of network input to preserve causality.
         if self.num_condition_series is None:
             batch_size = tf.shape(input_batch)[0]
-            encoded = tf.reshape(input_batch, [batch_size, -1, 1])
-            network_input = tf.reshape(input_batch, [batch_size, -1, 1])
+            encoded = tf.reshape(input_batch, [batch_size, -1, self.output_channels])
+            network_input = tf.reshape(input_batch, [batch_size, -1, self.output_channels])
             network_input_width = tf.shape(network_input)[1] - 1
             network_input = tf.slice(network_input, [0, 0, 0], [-1, network_input_width, -1])
             raw_output = self.create_network(network_input)
@@ -422,14 +441,17 @@ class WaveNet(object):
 
             #Mean Absolte Error
             loss = tf.reduce_mean(tf.abs(target_output - prediction))
+            MASE = loss / tf.reduce_mean(tf.abs(target_output[1:] - prediction[:-1]))
             tf.add_to_collection('prediction', prediction)
             tf.add_to_collection('target_output', target_output)
             tf.add_to_collection('MAE', loss)
+            tf.add_to_collection('MASE', MASE)
 
-            tf.summary.scalar('loss', loss)
+            tf.summary.scalar('MAE', loss)
+            tf.summary.scalar('MASE', MASE)
 
             if l2_regularization_strength == False:
-                return loss, target_output, prediction
+                return loss, MASE, target_output, prediction, raw_output, encoded
             else:
                 # L2 regularization for all trainable parameters
                 l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if not('bias' in v.name)])
@@ -440,22 +462,36 @@ class WaveNet(object):
                 tf.summary.scalar('l2_loss', l2_loss)
                 tf.summary.scalar('total_loss', total_loss)
 
-                return total_loss, target_output, prediction
+                return total_loss, MASE, target_output, prediction, raw_output, encoded
 
 
-    def restore_model(self, tf_session, global_step=99):
+    def restore_model(self, tf_session, global_step=9):
         new_saver = tf.train.import_meta_graph(SAVE_PATH + '-' + str(global_step) + '.meta')
         new_saver.restore(tf_session, tf.train.latest_checkpoint(LOG_DIR))
         self.prediction = tf.get_collection('prediction')
         self.target_output = tf.get_collection('target_output')
         self.MAE = tf.get_collection('MAE')
+        self.MASE = tf.get_collection('MASE')
 
 
-    def train(self, time_series, batch_size, epochs=100):
+    def train(self, time_series, batch_size, epochs=10):
+        if time_series.shape[1] == 1:
+            self.output_channels = 1
+            self.num_condition_series = None
+            self.batch_index = 0
+        else:
+            if self.MIMO == True:
+                self.output_channels = time_series.shape[1]
+                self.num_condition_series = None
+                self.batch_index = 0
+            else:
+                self.output_channels = 1
+                self.num_condition_series = time_series.shape[1]
+                self.batch_index = 1
 
         tf_session = tf.Session()
         x_ = self.create_placeholders()
-        self.MAE, self.target_output, self.prediction = self.loss(x_)
+        self.MAE, self.MASE, self.target_output, self.prediction, self.raw_output, self.encoded = self.loss(x_)
         merged = tf.summary.merge_all()
         train_step = tf.train.AdamOptimizer(1e-4).minimize(self.MAE)
         init_op = tf.global_variables_initializer()
@@ -463,125 +499,165 @@ class WaveNet(object):
         tf_saver = tf.train.Saver()
         train_writer = tf.summary.FileWriter(TRAIN_LOG, tf_session.graph)
         val_writer = tf.summary.FileWriter(VAL_LOG, tf_session.graph)
-
-        batches = self.time_series_to_batches(time_series)
+        batches = self.time_series_to_sequences(time_series, parallel=False)
+        print 'input shape:', batches.shape
+        num_sequences = batches.shape[self.batch_index]
+        train_stop = int(self.train_fraction*num_sequences)
 
         if self.num_condition_series is None:
-            num_batches = batches.shape[0]
-            train_stop = int(self.train_fraction*num_batches)
             train_x = batches[0:train_stop]
             val_x = batches[train_stop:]
-            for e in range(epochs):
-                for i in np.arange(0, train_x.shape[0], batch_size):
-                    tr_feed = {x_: train_x[i:i + batch_size, :, :]}
-                    tf_session.run(train_step, feed_dict=tr_feed)
-
-                tr_feed = {x_: train_x}
-                MAE = tf_session.run(self.MAE, feed_dict=tr_feed)
-                print 'Train MAE:', MAE
-                predicted, actual = tf_session.run([self.prediction, self.target_output], feed_dict=tr_feed)
-                MASE = MAE/np.mean(np.abs(actual[1:] - actual[:-1]))
-                print 'Train MASE:', MASE
-                summary_train = tf_session.run(merged, feed_dict=tr_feed)
-                train_writer.add_summary(summary_train, e)
-
-                val_feed = {x_: val_x}
-                MAE = tf_session.run(self.MAE, feed_dict=val_feed)
-                print 'Validation MAE:', MAE
-                predicted, actual = tf_session.run([self.prediction, self.target_output], feed_dict=val_feed)
-                MASE = MAE/np.mean(np.abs(actual[1:] - actual[:-1]))
-                print 'VAL MASE:', MASE
-                summary_val = tf_session.run(merged, feed_dict=val_feed)
-                val_writer.add_summary(summary_val, e)
-                if e==99:
-                    plt.plot(predicted, label='predicted')
-                    plt.plot(actual, label='actual')
-                    plt.legend()
-                    plt.show()
-                tf_saver.save(tf_session, SAVE_PATH, global_step=e)
-        else:
-            num_batches = batches.shape[1]
-            train_stop = int(self.train_fraction*num_batches)
+        else: 
             train_x = batches[:, 0:train_stop, :, :]
             val_x = batches[:, train_stop:, :, :]
-            for e in range(epochs):
-                for i in np.arange(0, train_x.shape[1], batch_size):
+
+        for e in range(epochs):
+            print 'step{}:'.format(e)
+            tr_feed = {}
+            for i in np.arange(0, train_x.shape[self.batch_index], batch_size):
+                if self.num_condition_series is None:
+                    tr_feed = {x_: train_x[i:i + batch_size, :, :]}
+                    val_feed = {x_: val_x[0:0 + batch_size, :, :]}
+                else:
                     tr_feed = {x_:train_x[:, i:i + batch_size, :, :]}
-                    tf_session.run(train_step, feed_dict=tr_feed)
-                    
-                tr_feed = {x_: train_x}
-                MAE = tf_session.run(self.MAE, feed_dict=tr_feed)
-                print 'Train MAE:', MAE
-                predicted, actual = tf_session.run([self.prediction, self.target_output], feed_dict=tr_feed)
-                MASE = MAE/np.mean(np.abs(actual[1:] - actual[:-1]))
-                print 'Train MASE:', MASE
-                summary_train = tf_session.run(merged, feed_dict=tr_feed)
-                train_writer.add_summary(summary_train, e)
+                    val_feed = {x_:val_x[:, 0:0 + batch_size, :, :]}
+                tf_session.run(train_step, feed_dict=tr_feed)
+            # target_output, prediction, raw_output, encoded = tf_session.run([tf.shape(self.target_output), tf.shape(self.prediction), tf.shape(self.raw_output), tf.shape(self.encoded)], feed_dict=tr_feed)
+            # print target_output, prediction, raw_output, encoded
+            MAE, MASE = tf_session.run([self.MAE, self.MASE], feed_dict=tr_feed)
+            print 'Train MAE:', MAE
+            print 'Train MASE:', MASE
+            summary_train = tf_session.run(merged, feed_dict=tr_feed)
+            train_writer.add_summary(summary_train, e)
 
-                val_feed = {x_: val_x}
-                MAE = tf_session.run(self.MAE, feed_dict=val_feed)
-                print 'Validation MAE:', MAE
-                predicted, actual = tf_session.run([self.prediction, self.target_output], feed_dict=val_feed)
-                print 'VAL MASE:', MASE
-                summary_val = tf_session.run(merged, feed_dict=val_feed)
-                summary_val = tf_session.run(merged, feed_dict=val_feed)
-                val_writer.add_summary(summary_val, e)
-
-                if e==99:
-                    plt.plot(predicted, label='predicted')
-                    plt.plot(actual, label='actual')
-                    plt.legend()
-                    plt.show()
-                tf_saver.save(tf_session, SAVE_PATH, global_step=e)
+            MAE, MASE = tf_session.run([self.MAE, self.MASE], feed_dict=val_feed)
+            print 'Val MAE:', MAE
+            print 'Val MASE:', MASE
+            summary_val = tf_session.run(merged, feed_dict=val_feed)
+            val_writer.add_summary(summary_val, e)
+            if e==epochs-1:
+                predicted, actual, MAE, MASE = tf_session.run([self.prediction, self.target_output, self.MAE, self.MASE], val_feed)
+                plt.plot(predicted, label='predicted', color='b')
+                plt.plot(actual, label='actual', color='r')
+                plt.legend()
+                plt.show()
+            tf_saver.save(tf_session, SAVE_PATH, global_step=e)
 
 
-    def inference(self, time_series):
-        batches = self.time_series_to_batches(time_series)
+    def predict_one_time_step(self, time_series, batch_size=32):
+        if time_series.shape[1] == 1:
+            self.output_channels = 1
+            self.num_condition_series = None
+            self.batch_index = 0
+        else:
+            if self.MIMO == True:
+                self.output_channels = time_series.shape[1]
+                self.num_condition_series = None
+                self.batch_index = 0
+            else:
+                self.output_channels = 1
+                self.num_condition_series = time_series.shape[1]
+                self.batch_index = 1
+        sequences = self.time_series_to_sequences(time_series, parallel=False)
         tf_session = tf.Session()
         self.restore_model(tf_session)
-        if self.num_condition_series is None:
-            inf_feed = {'input_sequence:0': batches}
-            predicted, actual, MAE = tf_session.run([self.prediction, self.target_output, self.MAE], inf_feed)
-            print MAE[0]
-            plt.plot(predicted[0], label='predicted')
-            plt.plot(actual[0], label='actual')
-            plt.legend()
-            plt.show()
-        else:
-            inf_feed = {'condition_sequences:0': batches}
-            predicted, actual, MAE = tf_session.run([self.prediction, self.target_output, self.MAE], inf_feed)
-            print MAE[0]
-            plt.plot(predicted[0], label='predicted')
-            plt.plot(actual[0], label='actual')
-            plt.legend()
-            plt.show()
+        predicted = []
+        actual = []
+        maes = []
+        mases = []
+        for i in np.arange(0, sequences.shape[self.batch_index], batch_size):
+            if self.num_condition_series is None:
+                inf_feed = {'input_sequence:0': sequences[i:i + batch_size, :, :]}
+            else:
+                inf_feed = {'condition_sequences:0': sequences[:, i:i + batch_size, :, :]}
+            p, a, mae, mase = tf_session.run([self.prediction, self.target_output, self.MAE, self.MASE], inf_feed)
+            maes.append(mae)
+            mases.append(mase)
+            if i==0:
+                predicted = p[0]
+                actual = a[0]
+            else:
+                predicted = np.vstack((predicted, p[0]))
+                actual = np.vstack((actual, a[0]))
+        print 'Test MAE:', np.mean(maes)
+        print 'Test MASES:', np.mean(mases)
+        plt.plot(predicted, label='predicted', color='b')
+        plt.plot(actual, label='actual', color='r')
+        plt.legend()
+        plt.show()
 
-def time_series_to_batches(time_series, num_condition_series, sequence_length):
-        if num_condition_series is None:
-            num_sequences = int(np.shape(time_series)[0] / sequence_length) + 1
-            num_leftover = num_sequences*sequence_length - time_series.shape[0]
-            x = np.pad(time_series, ((0, num_leftover)), mode='constant', constant_values=(0, 0))
-            batches = np.reshape(x, (num_sequences, sequence_length, 1))
-            return batches
+    def predict_n_time_steps(self, time_series, n, batch_size=32):
+        if time_series.shape[1] == 1:
+            self.output_channels = 1
+            self.num_condition_series = None
+            self.batch_index = 0
         else:
-            batches = []
-            for j in range(num_condition_series):
-                num_sequences = int(np.shape(time_series[:, j])[0] / sequence_length) + 1
-                num_leftover = num_sequences*sequence_length - time_series[:, j].shape[0]
-                x = np.pad(time_series[:, j], ((0, num_leftover)), mode='constant', constant_values=(0, 0))
-                batches.append(np.reshape(x, (num_sequences, sequence_length, 1)))
-            return np.array(batches)
+            if self.MIMO == True:
+                self.output_channels = time_series.shape[1]
+                self.num_condition_series = None
+                self.batch_index = 0
+            else:
+                self.output_channels = 1
+                self.num_condition_series = time_series.shape[1]
+                self.batch_index = 1
+        sequences = self.time_series_to_sequences(time_series, parallel=False)
+        tf_session = tf.Session()
+        self.restore_model(tf_session)
+        predicted = []
+        actual = []
+        maes = []
+        mases = []
+        for i in np.arange(0, sequences.shape[self.batch_index], batch_size):
+            if self.num_condition_series is None:
+                current_batch = sequences[i:i + batch_size, :, :]
+                inf_feed = {'input_sequence:0': current_batch}
+            else:
+                current_batch = sequences[:, i:i + batch_size, :, :]
+                inf_feed = {'condition_sequences:0': current_batch}
+            p, a = tf_session.run([self.prediction, self.target_output], inf_feed)
+            rolled = current_batch
+            for j in range(n-1):
+                if self.num_condition_series is None:
+                    rolled = np.roll(rolled, shift=rolled.shape[1]-1, axis=1)
+                    rolled[:, -1, :] = p[0]
+                    feed = {'input_sequence:0': rolled}
+                else:
+                    rolled = np.roll(rolled, shift=rolled.shape[2]-1, axis=2)
+                    rolled[0, :, -1, :] = p[0]
+                    feed = {'condition_sequences:0': rolled}
+                p = tf_session.run(self.prediction, feed)
+            if i==0:
+                predicted = p[0]
+                actual = a[0]
+            else:
+                predicted = np.vstack((predicted, p[0]))
+                actual = np.vstack((actual, a[0]))
+        mae = np.mean(np.abs(predicted[:-n] - actual[n:]))
+        mase = mae/np.mean(np.abs(predicted[:-n] - predicted[n:]))
+        print 'MAE:', mae
+        print 'MASE:', mase
+        plt.plot(predicted, label='predicted', color='b')
+        plt.plot(actual[n:], label='actual', color='r')
+        plt.legend()
+        plt.show()
+
+
+
+
 
 
 if __name__ == '__main__':
     ercot = ercot_data_interface()
     sources_sinks = ercot.get_sources_sinks()
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
-    train, test = ercot.get_train_test(nn[0])
-    # prices3 = np.squeeze(ercot.query_prices(nn[0], '2011-01-01', '2015-01-01').as_matrix())
-    # prices4 = np.squeeze(ercot.query_prices(nn[0], '2015-01-01', '2016-5-23').as_matrix())
-    print train.shape
-    wavenet = WaveNet(sequence_length=48, num_condition_series=train.shape[1])
-    wavenet.train(train, batch_size=256)
-    wavenet.inference(test)
+    train, test = ercot.get_train_test(ercot.all_nodes[0], normalize=False, include_seasonal_vectors=False)
+    wavenet = WaveNet(MIMO=False)
+    wavenet.train(train, batch_size=32)
+    # wavenet.predict_one_time_step(test)
+    wavenet.predict_n_time_steps(test, 24)
+
+    # x = np.sin(np.arange(0, 3000, 0.5))
+    # wavenet = WaveNet(sequence_length=48)
+    # wavenet.train(x, batch_size=128)
+
     

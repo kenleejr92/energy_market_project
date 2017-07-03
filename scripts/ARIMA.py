@@ -90,18 +90,24 @@ class ARIMA(object):
         plt.show()
 
 
-    def mape(self, x):
+    def mae(self, x):
         p_hat, z = self.predict(x)
         return np.mean(np.abs(p_hat-z))
+
+    def mase(self, x):
+        p_hat, z = self.predict(x)
+        return np.mean(np.abs(p_hat-z))/np.mean(np.abs(z[1:]-z[:-1]))
 
 
 if __name__ == '__main__':
     ercot = ercot_data_interface()
     crr_nodes = ercot.get_CRR_nodes()
-    # sources_sinks = ercot.get_sources_sinks()
-    # nn = ercot.get_nearest_CRR_neighbors(sources_sinks[20])
-    x = ercot.query_prices(crr_nodes[1], '2011-01-01', '2014-5-23').as_matrix()
-    y = ercot.query_prices(crr_nodes[1], '2014-5-23', '2016-5-23').as_matrix()
-    arima = ARIMA(p=5, d=0, q=5, seasonal=24)
-    arima.fit(x)
+    sources_sinks = ercot.get_sources_sinks()
+    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
+    train, test = ercot.get_train_test(nn[0], normalize=True, include_seasonal_vectors=False)
+    
+    arima = ARIMA(p=2, d=0, q=2, seasonal=24)
+    arima.fit(train)
+    arima.plot_predicted_vs_actual(test)
+    print arima.mase(test)
     
