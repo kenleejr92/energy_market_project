@@ -62,7 +62,8 @@ class WaveNet(object):
     self.num_condition_series: how many series to condition on
     self.histograms: record histograms
     '''
-    def __init__(self, MIMO=False):
+    def __init__(self, MIMO=False, look_back=1):
+        self.look_back = 1
         self.train_fraction = 0.8
         self.initial_filter_width = 2
         self.filter_width = 2
@@ -74,7 +75,7 @@ class WaveNet(object):
         self.use_batch_norm = False
         self.dilations = [1, 2, 4, 8, 16, 32, 64, 128]
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
-        self.sequence_length = self.receptive_field + 1
+        self.sequence_length = self.receptive_field + self.look_back
         self.histograms = True
 
 
@@ -123,7 +124,7 @@ class WaveNet(object):
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
                     if self.use_batch_norm:
-                        current_receptive_field = 1 + self.initial_filter_width
+                        current_receptive_field = self.look_back + self.initial_filter_width
                         current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
                         current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
 
@@ -145,7 +146,7 @@ class WaveNet(object):
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
                     if self.use_batch_norm:
-                        current_receptive_field = np.sum(self.dilations[:i]) + 1 + self.initial_filter_width
+                        current_receptive_field = np.sum(self.dilations[:i]) + self.look_back + self.initial_filter_width
                         current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
                         current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
 
@@ -190,7 +191,7 @@ class WaveNet(object):
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
                     if self.use_batch_norm:
-                        current_receptive_field = np.sum(self.dilations[:i]) + 1 + self.initial_filter_width
+                        current_receptive_field = np.sum(self.dilations[:i]) + self.look_back + self.initial_filter_width
                         current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
                         current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
                         
@@ -344,9 +345,9 @@ class WaveNet(object):
             current_layer = self._create_causal_layer(current_layer)
 
         if self.num_condition_series is None:
-            output_width = tf.shape(input_batch)[1] - self.receptive_field + 1
+            output_width = tf.shape(input_batch)[1] - self.receptive_field + self.look_back
         else:
-            output_width = tf.shape(input_batch[0])[1] - self.receptive_field + 1
+            output_width = tf.shape(input_batch[0])[1] - self.receptive_field + self.look_back
 
 
         # Add all defined dilation layers.
@@ -416,19 +417,19 @@ class WaveNet(object):
 
 
     def loss(self, input_batch, l2_regularization_strength=0.01):
-        # Cut off the last sample of network input to preserve causality.
+        # Cut off the last n samples of network input to preserve causality.
         if self.num_condition_series is None:
             batch_size = tf.shape(input_batch)[0]
             encoded = tf.reshape(input_batch, [batch_size, -1, self.output_channels])
             network_input = tf.reshape(input_batch, [batch_size, -1, self.output_channels])
-            network_input_width = tf.shape(network_input)[1] - 1
+            network_input_width = tf.shape(network_input)[1] - self.look_back
             network_input = tf.slice(network_input, [0, 0, 0], [-1, network_input_width, -1])
             raw_output = self.create_network(network_input)
         else:
             batch_size = tf.shape(input_batch)[1]
             encoded = tf.reshape(input_batch[0, :, :, :], [batch_size, -1, 1])
             condition_input = tf.reshape(input_batch, [self.num_condition_series, batch_size, -1, 1])
-            network_input_width = tf.shape(condition_input)[2] - 1
+            network_input_width = tf.shape(condition_input)[2] - self.look_back
             network_input = tf.slice(condition_input, [0, 0, 0, 0], [-1, -1, network_input_width, -1])
             raw_output = self.create_network(network_input)
 
@@ -649,12 +650,12 @@ class WaveNet(object):
 if __name__ == '__main__':
     ercot = ercot_data_interface()
     sources_sinks = ercot.get_sources_sinks()
-    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
-    train, test = ercot.get_train_test(ercot.all_nodes[0], normalize=False, include_seasonal_vectors=False)
-    wavenet = WaveNet(MIMO=False)
+    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
+    train, test = ercot.get_train_test(nn[0], normalize=False, include_seasonal_vectors=False)
+    wavenet = WaveNet(MIMO=False, look_back=1)
     wavenet.train(train, batch_size=32)
-    # wavenet.predict_one_time_step(test)
-    wavenet.predict_n_time_steps(test, 24)
+    wavenet.predict_one_time_step(test)
+    # wavenet.predict_n_time_steps(test, 24)
 
     # x = np.sin(np.arange(0, 3000, 0.5))
     # wavenet = WaveNet(sequence_length=48)
