@@ -128,7 +128,7 @@ class WaveNet(object):
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
                     if self.use_batch_norm:
-                        current_receptive_field = 1 + self.initial_filter_width
+                        current_receptive_field = self.initial_filter_width
                         current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
                         current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
 
@@ -137,6 +137,7 @@ class WaveNet(object):
         var['dilated_stack'] = list()
         with tf.variable_scope('dilation_stack_par'):        
             for i, dilation in enumerate(self.dilations):
+                if i == 0: var['dilated_stack'].append(None)
                 with tf.variable_scope('layer{}'.format(i+1)):
                     current = dict()
                     current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter')
@@ -150,7 +151,7 @@ class WaveNet(object):
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
                     if self.use_batch_norm:
-                        current_receptive_field = np.sum(self.dilations[:i]) + 1 + self.initial_filter_width
+                        current_receptive_field = (self.filter_width-1)*np.sum(self.dilations[:i+1]) + self.initial_filter_width
                         current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
                         current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
 
@@ -195,7 +196,7 @@ class WaveNet(object):
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
                     if self.use_batch_norm:
-                        current_receptive_field = np.sum(self.dilations[:i]) + 1 + self.initial_filter_width
+                        current_receptive_field = (self.filter_width-1)*np.sum(self.dilations[:i]) + self.initial_filter_width
                         current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
                         current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
                         
@@ -424,9 +425,9 @@ class WaveNet(object):
                 for j in range(self.num_condition_series):
                     seqs = []
                     for i in range(time_series.shape[0]):
-                        seqs.append(time_series[i:i+self.sequence_length, j])
                         if i + self.sequence_length >= time_series.shape[0]:
                             break
+                        seqs.append(time_series[i:i+self.sequence_length, j])
                     seqs = np.array(seqs)
                     sequences.append(seqs)
                 sequences = np.array(sequences)
@@ -515,6 +516,7 @@ class WaveNet(object):
         tf_session = tf.Session()
         x_ = self.create_placeholders()
         self.MAE, self.MASE, self.target_output, self.prediction = self.loss(x_)
+
         merged = tf.summary.merge_all()
         train_step = tf.train.AdamOptimizer(1e-4).minimize(self.MAE)
         init_op = tf.global_variables_initializer()
@@ -630,7 +632,7 @@ class WaveNet(object):
             actual = self.scaler.inverse_transform(actual)
             print actual.shape
         elif self.MIMO == False:
-            past = self.past[self.receptive_field:, 0].reshape(-1, 1)
+            past = self.past[self.receptive_field+1:, 0].reshape(-1, 1)
             predicted = np.exp(predicted + past)
             actual = np.exp(actual + past)
             predicted = self.scalers[0].inverse_transform(predicted)
@@ -642,7 +644,7 @@ class WaveNet(object):
                 predicted = self.scalerd[j].inverse_transform(predicted[:, j])
                 actual = self.scalers[j].inverse_transform(actual[:, j])
 
-
+        print actual.shape
         mae = np.mean(np.abs(predicted - actual))
         trivial = np.mean(np.abs(actual[self.forecast_horizon:] - actual[:-self.forecast_horizon]))
         print 'Test MAE:', mae
@@ -651,6 +653,7 @@ class WaveNet(object):
         plt.plot(actual, label='actual', color='r')
         plt.legend()
         plt.show()
+        return predicted, actual
 
 
     def predict_n_time_steps(self, time_series, n, batch_size, log_difference, global_step=10):
@@ -708,7 +711,7 @@ class WaveNet(object):
             actual = self.scaler.inverse_transform(actual)
             print actual.shape
         elif self.MIMO == False:
-            past = self.past[self.receptive_field:, 0].reshape(-1, 1)
+            past = self.past[self.receptive_field+1:, 0].reshape(-1, 1)
             predicted = np.exp(predicted + past)
             actual = np.exp(actual + past)
             predicted = self.scalers[0].inverse_transform(predicted)
@@ -739,12 +742,14 @@ if __name__ == '__main__':
     sources_sinks = ercot.get_sources_sinks()
     node0 = ercot.all_nodes[0]
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
-    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=True)
+    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
     wavenet = WaveNet(MIMO=False, forecast_horizon=1)
     wavenet.train(train, batch_size=128, log_difference=True, epochs=10)
-    wavenet.predict_one_time_step(test, batch_size=128, log_difference=True, global_step=10)
-    # wavenet.predict_n_time_steps(test, 24, batch_size=128, log_difference=True, global_step=10)
+    predicted1, actual1 = wavenet.predict_one_time_step(test, batch_size=128, log_difference=True, global_step=9)
 
+
+
+    # wavenet.predict_n_time_steps(test, 24, batch_size=128, log_difference=True, global_step=10)
     # x = np.sin(np.arange(0, 3000, 0.5))
     # wavenet = WaveNet(sequence_length=48)
     # wavenet.train(x, batch_size=128)
