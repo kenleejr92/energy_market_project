@@ -63,7 +63,7 @@ class WaveNet(object):
     self.histograms: record histograms
     '''
     def __init__(self, MIMO=False, look_back=1):
-        self.look_back = 1
+        self.look_back = look_back
         self.train_fraction = 0.8
         self.initial_filter_width = 2
         self.filter_width = 2
@@ -73,10 +73,11 @@ class WaveNet(object):
         self.skip_channels = 256
         self.use_biases = True
         self.use_batch_norm = False
-        self.dilations = [1, 2, 4, 8, 16, 32, 64, 128]
+        self.dilations = [1, 2, 4, 8, 16, 32, 64]
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
-        self.sequence_length = self.receptive_field + self.look_back
+        self.sequence_length = self.receptive_field + 1
         self.histograms = True
+        self.random_seed = tf.set_random_seed(22943)
 
 
     def calculate_receptive_field(self, filter_width, dilations):
@@ -124,7 +125,7 @@ class WaveNet(object):
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
                     if self.use_batch_norm:
-                        current_receptive_field = self.look_back + self.initial_filter_width
+                        current_receptive_field = 1 + self.initial_filter_width
                         current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
                         current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
 
@@ -146,7 +147,7 @@ class WaveNet(object):
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
                     if self.use_batch_norm:
-                        current_receptive_field = np.sum(self.dilations[:i]) + self.look_back + self.initial_filter_width
+                        current_receptive_field = np.sum(self.dilations[:i]) + 1 + self.initial_filter_width
                         current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
                         current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
 
@@ -191,7 +192,7 @@ class WaveNet(object):
                         current['skip_bias'] = bias_variable([self.skip_channels], 'slip_bias')
 
                     if self.use_batch_norm:
-                        current_receptive_field = np.sum(self.dilations[:i]) + self.look_back + self.initial_filter_width
+                        current_receptive_field = np.sum(self.dilations[:i]) + 1 + self.initial_filter_width
                         current['filter_scale'] = scale_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_scaler')
                         current['filter_offset'] = offset_variable([self.sequence_length - current_receptive_field, self.residual_channels], 'BN_offset')
                         
@@ -345,9 +346,9 @@ class WaveNet(object):
             current_layer = self._create_causal_layer(current_layer)
 
         if self.num_condition_series is None:
-            output_width = tf.shape(input_batch)[1] - self.receptive_field + self.look_back
+            output_width = tf.shape(input_batch)[1] - self.receptive_field + 1
         else:
-            output_width = tf.shape(input_batch[0])[1] - self.receptive_field + self.look_back
+            output_width = tf.shape(input_batch[0])[1] - self.receptive_field + 1
 
 
         # Add all defined dilation layers.
@@ -388,9 +389,12 @@ class WaveNet(object):
             else:
                 sequences = []
                 for i in range(time_series.shape[0]):
-                    sequences.append(time_series[i:i+self.sequence_length])
-                    if i + self.sequence_length >= time_series.shape[0]:
+                    if i + self.receptive_field + self.look_back >= time_series.shape[0]:
                         break
+                    past_samples = time_series[i:i + self.receptive_field]
+                    future_samples = time_series[i + self.receptive_field + self.look_back - 1]
+                    seq = np.vstack((past_samples, future_samples))
+                    sequences.append(seq)
                 sequences = np.array(sequences)
             return sequences
         else:
@@ -422,14 +426,14 @@ class WaveNet(object):
             batch_size = tf.shape(input_batch)[0]
             encoded = tf.reshape(input_batch, [batch_size, -1, self.output_channels])
             network_input = tf.reshape(input_batch, [batch_size, -1, self.output_channels])
-            network_input_width = tf.shape(network_input)[1] - self.look_back
+            network_input_width = tf.shape(network_input)[1] - 1
             network_input = tf.slice(network_input, [0, 0, 0], [-1, network_input_width, -1])
             raw_output = self.create_network(network_input)
         else:
             batch_size = tf.shape(input_batch)[1]
             encoded = tf.reshape(input_batch[0, :, :, :], [batch_size, -1, 1])
             condition_input = tf.reshape(input_batch, [self.num_condition_series, batch_size, -1, 1])
-            network_input_width = tf.shape(condition_input)[2] - self.look_back
+            network_input_width = tf.shape(condition_input)[2] - 1
             network_input = tf.slice(condition_input, [0, 0, 0, 0], [-1, -1, network_input_width, -1])
             raw_output = self.create_network(network_input)
 
@@ -442,7 +446,7 @@ class WaveNet(object):
 
             #Mean Absolte Error
             loss = tf.reduce_mean(tf.abs(target_output - prediction))
-            MASE = loss / tf.reduce_mean(tf.abs(target_output[1:] - prediction[:-1]))
+            MASE = loss / tf.reduce_mean(tf.abs(encoded[:, 1:, :] - encoded[:, :-1, :]))
             tf.add_to_collection('prediction', prediction)
             tf.add_to_collection('target_output', target_output)
             tf.add_to_collection('MAE', loss)
@@ -452,7 +456,7 @@ class WaveNet(object):
             tf.summary.scalar('MASE', MASE)
 
             if l2_regularization_strength == False:
-                return loss, MASE, target_output, prediction, raw_output, encoded
+                return loss, MASE, target_output, prediction
             else:
                 # L2 regularization for all trainable parameters
                 l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if not('bias' in v.name)])
@@ -463,10 +467,10 @@ class WaveNet(object):
                 tf.summary.scalar('l2_loss', l2_loss)
                 tf.summary.scalar('total_loss', total_loss)
 
-                return total_loss, MASE, target_output, prediction, raw_output, encoded
+                return total_loss, MASE, target_output, prediction
 
 
-    def restore_model(self, tf_session, global_step=9):
+    def restore_model(self, tf_session, global_step=19):
         new_saver = tf.train.import_meta_graph(SAVE_PATH + '-' + str(global_step) + '.meta')
         new_saver.restore(tf_session, tf.train.latest_checkpoint(LOG_DIR))
         self.prediction = tf.get_collection('prediction')
@@ -475,7 +479,7 @@ class WaveNet(object):
         self.MASE = tf.get_collection('MASE')
 
 
-    def train(self, time_series, batch_size, epochs=10):
+    def train(self, time_series, batch_size, epochs=20):
         if time_series.shape[1] == 1:
             self.output_channels = 1
             self.num_condition_series = None
@@ -492,7 +496,7 @@ class WaveNet(object):
 
         tf_session = tf.Session()
         x_ = self.create_placeholders()
-        self.MAE, self.MASE, self.target_output, self.prediction, self.raw_output, self.encoded = self.loss(x_)
+        self.MAE, self.MASE, self.target_output, self.prediction = self.loss(x_)
         merged = tf.summary.merge_all()
         train_step = tf.train.AdamOptimizer(1e-4).minimize(self.MAE)
         init_op = tf.global_variables_initializer()
@@ -515,37 +519,54 @@ class WaveNet(object):
         for e in range(epochs):
             print 'step{}:'.format(e)
             tr_feed = {}
+            predicted_train = []
+            predicted_val = []
+            actual_train = []
+            actual_val = []
             for i in np.arange(0, train_x.shape[self.batch_index], batch_size):
                 if self.num_condition_series is None:
                     tr_feed = {x_: train_x[i:i + batch_size, :, :]}
-                    val_feed = {x_: val_x[0:0 + batch_size, :, :]}
                 else:
                     tr_feed = {x_:train_x[:, i:i + batch_size, :, :]}
-                    val_feed = {x_:val_x[:, 0:0 + batch_size, :, :]}
                 tf_session.run(train_step, feed_dict=tr_feed)
-            # target_output, prediction, raw_output, encoded = tf_session.run([tf.shape(self.target_output), tf.shape(self.prediction), tf.shape(self.raw_output), tf.shape(self.encoded)], feed_dict=tr_feed)
-            # print target_output, prediction, raw_output, encoded
-            MAE, MASE = tf_session.run([self.MAE, self.MASE], feed_dict=tr_feed)
-            print 'Train MAE:', MAE
-            print 'Train MASE:', MASE
+                pt, at = tf_session.run([self.prediction, self.target_output], feed_dict=tr_feed)
+                if i==0:
+                    predicted_train = pt[0]
+                    actual_train = at[0]
+                else:
+                    predicted_train = np.vstack((predicted_train, pt[0]))
+                    actual_train = np.vstack((actual_train, at[0]))
+
+            for i in np.arange(0, val_x.shape[self.batch_index], batch_size):
+                if self.num_condition_series is None:
+                    val_feed = {x_: val_x[i:i + batch_size, :, :]}
+                else:
+                    val_feed = {x_:val_x[:, i:i + batch_size, :, :]}
+                pv, av = tf_session.run([self.prediction, self.target_output], feed_dict=val_feed)
+                if i==0:
+                    predicted_val = pv[0]
+                    actual_val = av[0]
+                else:
+                    predicted_val = np.vstack((predicted_val, pv[0]))
+                    actual_val = np.vstack((actual_val, av[0]))
+            
+            mae = np.mean(np.abs(predicted_train - actual_train))
+            trivial = np.mean(np.abs(actual_train[1:] - actual_train[:-1]))
+            print 'Train MAE:', mae
+            print 'Train MASE:', mae/trivial
             summary_train = tf_session.run(merged, feed_dict=tr_feed)
             train_writer.add_summary(summary_train, e)
 
-            MAE, MASE = tf_session.run([self.MAE, self.MASE], feed_dict=val_feed)
-            print 'Val MAE:', MAE
-            print 'Val MASE:', MASE
+            mae = np.mean(np.abs(predicted_val - actual_val))
+            trivial = np.mean(np.abs(actual_val[1:] - actual_val[:-1]))
+            print 'Val MAE:', mae
+            print 'Val MASE:', mae/trivial
             summary_val = tf_session.run(merged, feed_dict=val_feed)
             val_writer.add_summary(summary_val, e)
-            if e==epochs-1:
-                predicted, actual, MAE, MASE = tf_session.run([self.prediction, self.target_output, self.MAE, self.MASE], val_feed)
-                plt.plot(predicted, label='predicted', color='b')
-                plt.plot(actual, label='actual', color='r')
-                plt.legend()
-                plt.show()
             tf_saver.save(tf_session, SAVE_PATH, global_step=e)
 
 
-    def predict_one_time_step(self, time_series, batch_size=32):
+    def predict_one_time_step(self, time_series, batch_size=128):
         if time_series.shape[1] == 1:
             self.output_channels = 1
             self.num_condition_series = None
@@ -564,24 +585,22 @@ class WaveNet(object):
         self.restore_model(tf_session)
         predicted = []
         actual = []
-        maes = []
-        mases = []
         for i in np.arange(0, sequences.shape[self.batch_index], batch_size):
             if self.num_condition_series is None:
                 inf_feed = {'input_sequence:0': sequences[i:i + batch_size, :, :]}
             else:
                 inf_feed = {'condition_sequences:0': sequences[:, i:i + batch_size, :, :]}
-            p, a, mae, mase = tf_session.run([self.prediction, self.target_output, self.MAE, self.MASE], inf_feed)
-            maes.append(mae)
-            mases.append(mase)
+            p, a = tf_session.run([self.prediction, self.target_output], inf_feed)
             if i==0:
                 predicted = p[0]
                 actual = a[0]
             else:
                 predicted = np.vstack((predicted, p[0]))
                 actual = np.vstack((actual, a[0]))
-        print 'Test MAE:', np.mean(maes)
-        print 'Test MASES:', np.mean(mases)
+        mae = np.mean(np.abs(predicted - actual))
+        trivial = np.mean(np.abs(actual[self.look_back:] - actual[:-self.look_back]))
+        print 'Test MAE:', mae
+        print 'Test MASE:', mae/trivial
         plt.plot(predicted, label='predicted', color='b')
         plt.plot(actual, label='actual', color='r')
         plt.legend()
@@ -650,10 +669,11 @@ class WaveNet(object):
 if __name__ == '__main__':
     ercot = ercot_data_interface()
     sources_sinks = ercot.get_sources_sinks()
+    node0 = ercot.all_nodes[0]
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
-    train, test = ercot.get_train_test(nn[0], normalize=False, include_seasonal_vectors=False)
+    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
     wavenet = WaveNet(MIMO=False, look_back=1)
-    wavenet.train(train, batch_size=32)
+    wavenet.train(train, batch_size=1024)
     wavenet.predict_one_time_step(test)
     # wavenet.predict_n_time_steps(test, 24)
 

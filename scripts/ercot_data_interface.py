@@ -169,7 +169,7 @@ class ercot_data_interface(object):
             return CRR_nodes
 
 
-    def get_train_test(self, node, normalize=True, include_seasonal_vectors=True):
+    def get_train_test(self, node, normalize=True, include_seasonal_vectors=True, log_difference=False):
         X = self.query_prices(node, '2011-01-01', '2016-5-23')
         datetimes = X.index
         X = X.as_matrix()
@@ -194,6 +194,9 @@ class ercot_data_interface(object):
                 self.standard_scaler = StandardScaler()
                 train = self.standard_scaler.fit_transform(train)
                 test = self.standard_scaler.transform(test)
+        if log_difference == True:
+            train = np.log(train[1:]) - np.log(train[:-1])
+            test = np.log(test[1:]) - np.log(test[:-1])
         return train, test
 
 
