@@ -104,7 +104,8 @@ if __name__ == '__main__':
     crr_nodes = ercot.get_CRR_nodes()
     sources_sinks = ercot.get_sources_sinks()
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
-    train, test = ercot.get_train_test(nn[0], normalize=True, include_seasonal_vectors=False)
+    node0 = ercot.all_nodes[0]
+    train, test = ercot.get_train_test(node0, normalize=True, include_seasonal_vectors=False)
     
     arima = ARIMA(p=2, d=0, q=2, seasonal=24)
     arima.fit(train)
