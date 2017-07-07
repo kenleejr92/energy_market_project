@@ -140,7 +140,7 @@ class ercot_data_interface(object):
                 if n not in self.all_nodes:
                     del nn[i]
             if node not in self.all_nodes:
-                return None
+                raise ValueError('No nearest neighbors found')
             else:
                 return [node] + nn
 
@@ -204,29 +204,14 @@ class ercot_data_interface(object):
 if __name__ == '__main__':
     ercot = ercot_data_interface()
     sources_sinks = ercot.get_sources_sinks()
-    #source_sinks[20] gave an error
-    nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
-    if nn == None:
-        print 'Prices not found'
-    else:
+    try:
+        nn = ercot.get_nearest_CRR_neighbors(sources_sinks[20])
         train, test = ercot.get_train_test(nn[0], include_seasonal_vectors=False)
         plt.plot(train)
         plt.show()
-        # scaler = MinMaxScaler((-1,1))
-        # train = scaler.fit_transform(train)
-        # mu = 1024
-        # F = np.sign(train)*np.log(1 + mu*np.abs(train))/np.log(1 + mu)
-        # F = ((F + 1) / 2 * mu + 0.5).astype('int')
-        # print F
-        # plt.plot(F)
-        # plt.show()
-    # plt.plot(train)
-    # plt.show()
-    # print train.shape
-    # plt.plot(train, label='train')
-    # plt.plot(test, label='test')
-    # plt.plot(val, label='val')
-    # plt.legend()
-    # plt.show()
+    except Exception as error:
+        print(repr(error))
 
+
+        
 

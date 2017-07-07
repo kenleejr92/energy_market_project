@@ -63,7 +63,7 @@ class WaveNet(object):
     self.num_condition_series: how many series to condition on
     self.histograms: record histograms
     '''
-    def __init__(self, MIMO=False, forecast_horizon=1):
+    def __init__(self, forecast_horizon, MIMO=False):
         self.forecast_horizon = forecast_horizon
         self.log_difference = None
         self.epochs = 10
@@ -91,6 +91,41 @@ class WaveNet(object):
         print 'Receptive Field Size:', receptive_field
         return receptive_field
 
+    def set_parameters(self, time_series):
+        if time_series.shape[1] == 1:
+            self.output_channels = 1
+            self.num_condition_series = None
+            self.batch_index = 0
+        else:
+            if self.MIMO == True:
+                self.output_channels = time_series.shape[1]
+                self.num_condition_series = None
+                self.batch_index = 0
+            else:
+                self.output_channels = 1
+                self.num_condition_series = time_series.shape[1]
+                self.batch_index = 1
+
+    def inverse_transform(self, predicted, actual):
+        if self.num_condition_series is None:
+            predicted = np.exp(predicted + self.past[self.receptive_field+self.forecast_horizon:])
+            actual = np.exp(actual + self.past[self.receptive_field+self.forecast_horizon:])
+            predicted = self.scaler.inverse_transform(predicted)
+            actual = self.scaler.inverse_transform(actual)
+            print actual.shape
+        elif self.MIMO == False:
+            past = self.past[self.receptive_field+self.forecast_horizon:, 0].reshape(-1, 1)
+            predicted = np.exp(predicted + past)
+            actual = np.exp(actual + past)
+            predicted = self.scalers[0].inverse_transform(predicted)
+            actual = self.scalers[0].inverse_transform(actual)
+        elif self.MIMO == True:
+            predicted = np.exp(predicted + self.past[self.receptive_field+self.forecast_horizon:])
+            actual = np.exp(actual + self.past[self.receptive_field+self.forecast_horizon:])
+            for j in range(num_condition_series):
+                predicted = self.scalerd[j].inverse_transform(predicted[:, j])
+                actual = self.scalers[j].inverse_transform(actual[:, j])
+        return predicted, actual
 
     def create_placeholders(self):
         """ 
@@ -425,9 +460,14 @@ class WaveNet(object):
                 for j in range(self.num_condition_series):
                     seqs = []
                     for i in range(time_series.shape[0]):
-                        if i + self.sequence_length >= time_series.shape[0]:
+                        if i + self.receptive_field + self.forecast_horizon >= time_series.shape[0]:
                             break
-                        seqs.append(time_series[i:i+self.sequence_length, j])
+                        past_samples = time_series[i:i + self.receptive_field, j]
+                        future_samples = time_series[i + self.receptive_field + self.forecast_horizon - 1, j]
+                        past_samples = past_samples.reshape(-1, 1)
+                        seq = np.vstack((past_samples, future_samples))
+                        seq = np.squeeze(seq)
+                        seqs.append(seq)
                     seqs = np.array(seqs)
                     sequences.append(seqs)
                 sequences = np.array(sequences)
@@ -494,24 +534,52 @@ class WaveNet(object):
         self.MASE = tf.get_collection('MASE')
 
 
+    def inference_batches_to_series(self, tf_session, 
+                                            sequences, 
+                                            batch_index, 
+                                            batch_size, 
+                                            num_condition_series, 
+                                            prediction, 
+                                            target_output, 
+                                            train_step = None, 
+                                            place_holder=None,
+                                            merged = None,
+                                            writer = None,
+                                            epoch = None):
+        predicted = []
+        actual = []
+        for i in np.arange(0, sequences.shape[batch_index], batch_size):
+            if num_condition_series is None:
+                if place_holder is None:
+                    inf_feed = {'input_sequence:0': sequences[i:i + batch_size, :, :]}
+                else:
+                    inf_feed = {place_holder: sequences[i:i + batch_size, :, :]}
+            else:
+                if place_holder is None:
+                    inf_feed = {'condition_sequences:0': sequences[:, i:i + batch_size, :, :]}
+                else:
+                    inf_feed = {place_holder: sequences[:, i:i + batch_size, :, :]}
+            if train_step is not None:
+                tf_session.run(train_step, feed_dict=inf_feed)
+            if merged is not None and writer is not None:
+                if i % 1000 == 0:
+                    summary = tf_session.run(merged, feed_dict=inf_feed)
+                    writer.add_summary(summary, int(epoch*sequences.shape[batch_index]/batch_size) + i)
+            p, a = tf_session.run([prediction, target_output], feed_dict=inf_feed)
+            if i==0:
+                predicted = p[0]
+                actual = a[0]
+            else:
+                predicted = np.vstack((predicted, p[0]))
+                actual = np.vstack((actual, a[0]))
+        return predicted, actual
+
     def train(self, time_series, batch_size, log_difference, epochs, train_fraction=0.8):
         self.epochs = epochs
         self.batch_size = batch_size
         self.train_fraction = train_fraction
         self.log_difference = log_difference
-        if time_series.shape[1] == 1:
-            self.output_channels = 1
-            self.num_condition_series = None
-            self.batch_index = 0
-        else:
-            if self.MIMO == True:
-                self.output_channels = time_series.shape[1]
-                self.num_condition_series = None
-                self.batch_index = 0
-            else:
-                self.output_channels = 1
-                self.num_condition_series = time_series.shape[1]
-                self.batch_index = 1
+        self.set_parameters(time_series)
 
         tf_session = tf.Session()
         x_ = self.create_placeholders()
@@ -538,111 +606,74 @@ class WaveNet(object):
 
         for e in range(epochs):
             print 'step{}:'.format(e)
-            tr_feed = {}
-            predicted_train = []
-            predicted_val = []
-            actual_train = []
-            actual_val = []
-            for i in np.arange(0, train_x.shape[self.batch_index], batch_size):
-                if self.num_condition_series is None:
-                    tr_feed = {x_: train_x[i:i + batch_size, :, :]}
-                else:
-                    tr_feed = {x_:train_x[:, i:i + batch_size, :, :]}
-                tf_session.run(train_step, feed_dict=tr_feed)
-                pt, at = tf_session.run([self.prediction, self.target_output], feed_dict=tr_feed)
-                if i==0:
-                    predicted_train = pt
-                    actual_train = at
-                else:
-                    predicted_train = np.vstack((predicted_train, pt))
-                    actual_train = np.vstack((actual_train, at))
-
-            for i in np.arange(0, val_x.shape[self.batch_index], batch_size):
-                if self.num_condition_series is None:
-                    val_feed = {x_: val_x[i:i + batch_size, :, :]}
-                else:
-                    val_feed = {x_:val_x[:, i:i + batch_size, :, :]}
-                pv, av = tf_session.run([self.prediction, self.target_output], feed_dict=val_feed)
-                if i==0:
-                    predicted_val = pv
-                    actual_val = av
-                else:
-                    predicted_val = np.vstack((predicted_val, pv))
-                    actual_val = np.vstack((actual_val, av))
+            predicted_train, actual_train = self.inference_batches_to_series(tf_session, 
+                                                                            train_x, 
+                                                                            self.batch_index, 
+                                                                            self.batch_size, 
+                                                                            self.num_condition_series, 
+                                                                            self.prediction, 
+                                                                            self.target_output, 
+                                                                            train_step = train_step, 
+                                                                            place_holder=x_, 
+                                                                            merged=merged,
+                                                                            writer=train_writer,
+                                                                            epoch=e)
+            predicted_val, actual_val = self.inference_batches_to_series(tf_session, 
+                                                                        val_x, 
+                                                                        self.batch_index, 
+                                                                        self.batch_size, 
+                                                                        self.num_condition_series, 
+                                                                        self.prediction, 
+                                                                        self.target_output, 
+                                                                        train_step = None, 
+                                                                        place_holder=x_,
+                                                                        merged=merged,
+                                                                        writer=val_writer,
+                                                                        epoch=e)
             
             mae = np.mean(np.abs(predicted_train - actual_train))
             trivial = np.mean(np.abs(actual_train[1:] - actual_train[:-1]))
             print 'Train MAE:', mae
             print 'Train MASE:', mae/trivial
-            summary_train = tf_session.run(merged, feed_dict=tr_feed)
-            train_writer.add_summary(summary_train, e)
 
             mae = np.mean(np.abs(predicted_val - actual_val))
             trivial = np.mean(np.abs(actual_val[1:] - actual_val[:-1]))
             print 'Val MAE:', mae
             print 'Val MASE:', mae/trivial
-            summary_val = tf_session.run(merged, feed_dict=val_feed)
-            val_writer.add_summary(summary_val, e)
             tf_saver.save(tf_session, SAVE_PATH, global_step=e)
 
 
     def predict_one_time_step(self, time_series, batch_size, log_difference, global_step=10):
         self.batch_size = batch_size
         self.log_difference = log_difference
-        if time_series.shape[1] == 1:
-            self.output_channels = 1
-            self.num_condition_series = None
-            self.batch_index = 0
-        else:
-            if self.MIMO == True:
-                self.output_channels = time_series.shape[1]
-                self.num_condition_series = None
-                self.batch_index = 0
-            else:
-                self.output_channels = 1
-                self.num_condition_series = time_series.shape[1]
-                self.batch_index = 1
+        self.set_parameters(time_series)
         sequences = self.time_series_to_sequences(time_series, self.log_difference, parallel=False)
         tf_session = tf.Session()
         self.restore_model(tf_session, global_step)
-        predicted = []
-        actual = []
-        for i in np.arange(0, sequences.shape[self.batch_index], self.batch_size):
-            if self.num_condition_series is None:
-                inf_feed = {'input_sequence:0': sequences[i:i + self.batch_size, :, :]}
-            else:
-                inf_feed = {'condition_sequences:0': sequences[:, i:i + self.batch_size, :, :]}
-            p, a = tf_session.run([self.prediction, self.target_output], inf_feed)
-            if i==0:
-                predicted = p[0]
-                actual = a[0]
-            else:
-                predicted = np.vstack((predicted, p[0]))
-                actual = np.vstack((actual, a[0]))
+        predicted, actual = self.inference_batches_to_series(tf_session, 
+                                                                sequences, 
+                                                                self.batch_index, 
+                                                                self.batch_size, 
+                                                                self.num_condition_series, 
+                                                                self.prediction, 
+                                                                self.target_output, 
+                                                                train_step = None, 
+                                                                place_holder=None,
+                                                                merged = None,
+                                                                writer = None,
+                                                                epoch=None)
 
+        plt.plot(predicted, label='predicted', color='b')
+        plt.plot(actual, label='actual', color='r')
+        plt.legend()
+        plt.show()
         mae = np.mean(np.abs(predicted - actual))
         trivial = np.mean(np.abs(actual[self.forecast_horizon:] - actual[:-self.forecast_horizon]))
         print 'Test MAE:', mae
         print 'Test MASE:', mae/trivial
 
-        if self.num_condition_series is None:
-            predicted = np.exp(predicted + self.past[self.receptive_field+1:])
-            actual = np.exp(actual + self.past[self.receptive_field+1:])
-            predicted = self.scaler.inverse_transform(predicted)
-            actual = self.scaler.inverse_transform(actual)
-            print actual.shape
-        elif self.MIMO == False:
-            past = self.past[self.receptive_field+1:, 0].reshape(-1, 1)
-            predicted = np.exp(predicted + past)
-            actual = np.exp(actual + past)
-            predicted = self.scalers[0].inverse_transform(predicted)
-            actual = self.scalers[0].inverse_transform(actual)
-        elif self.MIMO == True:
-            predicted = np.exp(predicted + self.past[self.receptive_field+1:])
-            actual = np.exp(actual + self.past[self.receptive_field+1:])
-            for j in range(num_condition_series):
-                predicted = self.scalerd[j].inverse_transform(predicted[:, j])
-                actual = self.scalers[j].inverse_transform(actual[:, j])
+        if self.log_difference == True:
+            predicted, actual = self.inverse_transform(predicted, actual)
 
         print actual.shape
         mae = np.mean(np.abs(predicted - actual))
@@ -659,19 +690,7 @@ class WaveNet(object):
     def predict_n_time_steps(self, time_series, n, batch_size, log_difference, global_step=10):
         self.batch_size = batch_size
         self.log_difference = self.log_difference
-        if time_series.shape[1] == 1:
-            self.output_channels = 1
-            self.num_condition_series = None
-            self.batch_index = 0
-        else:
-            if self.MIMO == True:
-                self.output_channels = time_series.shape[1]
-                self.num_condition_series = None
-                self.batch_index = 0
-            else:
-                self.output_channels = 1
-                self.num_condition_series = time_series.shape[1]
-                self.batch_index = 1
+        self.set_parameters(time_series)
         sequences = self.time_series_to_sequences(time_series, self.log_difference, parallel=False)
         tf_session = tf.Session()
         self.restore_model(tf_session, global_step)
@@ -703,25 +722,8 @@ class WaveNet(object):
                 predicted = np.vstack((predicted, p[0]))
                 actual = np.vstack((actual, a[0]))
 
-
-        if self.num_condition_series is None:
-            predicted = np.exp(predicted + self.past[self.receptive_field+1:])
-            actual = np.exp(actual + self.past[self.receptive_field+1:])
-            predicted = self.scaler.inverse_transform(predicted)
-            actual = self.scaler.inverse_transform(actual)
-            print actual.shape
-        elif self.MIMO == False:
-            past = self.past[self.receptive_field+1:, 0].reshape(-1, 1)
-            predicted = np.exp(predicted + past)
-            actual = np.exp(actual + past)
-            predicted = self.scalers[0].inverse_transform(predicted)
-            actual = self.scalers[0].inverse_transform(actual)
-        elif self.MIMO == True:
-            predicted = np.exp(predicted + self.past[self.receptive_field+1:])
-            actual = np.exp(actual + self.past[self.receptive_field+1:])
-            for j in range(num_condition_series):
-                predicted = self.scalerd[j].inverse_transform(predicted[:, j])
-                actual = self.scalers[j].inverse_transform(actual[:, j])
+        if self.log_difference == True:
+            predicted, actual = self.inverse_transform(predicted, actual)
 
         mae = np.mean(np.abs(predicted[:-n] - actual[n:]))
         mase = mae/np.mean(np.abs(predicted[:-n] - predicted[n:]))
@@ -742,16 +744,11 @@ if __name__ == '__main__':
     sources_sinks = ercot.get_sources_sinks()
     node0 = ercot.all_nodes[0]
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
-    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
-    wavenet = WaveNet(MIMO=False, forecast_horizon=1)
+    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=True)
+    wavenet = WaveNet(MIMO=True, forecast_horizon=1)
     wavenet.train(train, batch_size=128, log_difference=True, epochs=10)
     predicted1, actual1 = wavenet.predict_one_time_step(test, batch_size=128, log_difference=True, global_step=9)
 
 
-
-    # wavenet.predict_n_time_steps(test, 24, batch_size=128, log_difference=True, global_step=10)
-    # x = np.sin(np.arange(0, 3000, 0.5))
-    # wavenet = WaveNet(sequence_length=48)
-    # wavenet.train(x, batch_size=128)
 
     
