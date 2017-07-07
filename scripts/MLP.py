@@ -1,3 +1,4 @@
+
 import numpy as np
 from ercot_data_interface import ercot_data_interface
 from sklearn.neural_network import MLPRegressor
@@ -87,3 +88,4 @@ if __name__ == '__main__':
     mlp = MLP(forecast_horizon=2000)
     mlp.train(train)
     mlp.predict(test)
+

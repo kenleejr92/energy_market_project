@@ -47,12 +47,17 @@ class ARIMA(object):
 
     def make_lag_matrix(self, v, p):
         X = []
-        for k in np.arange(1, p):
-            v_k= v[(p-k):-k]
-            X.append(v_k)
+        if p > 1:
+            for k in np.arange(1, p):
+                v_k= v[(p-k):-k]
+                X.append(v_k)
         X.append(v[:-p])
-        X = np.squeeze(np.array(X))
-        X = np.swapaxes(X, 0, 1)
+        X = np.array(X)
+        X = np.squeeze(X)
+        if p >1: 
+            X = np.swapaxes(X, 0, 1)
+        else:
+            X = np.expand_dims(X, 1)
         return X
 
     def fit(self, x):
@@ -70,7 +75,7 @@ class ARIMA(object):
         if self.q == 0:
             y_hat = self.linear_regression.predict(X)
             y_hat = np.expand_dims(y_hat, 1)
-            p_hat = y_hat + x[self.p:-24]
+            p_hat = y_hat + x[self.p:-self.seasonal]
             return p_hat, x[self.seasonal + self.p:]
         else:
             y_hat = self.linear_regression.predict(X)
@@ -79,7 +84,7 @@ class ARIMA(object):
             error_term = np.sum(E, axis=1)
             y_hat = y_hat[self.q:] + error_term
             y_hat = np.expand_dims(y_hat, 1)
-            p_hat = y_hat + x[self.p+self.q:-24]
+            p_hat = y_hat + x[self.p+self.q:-self.seasonal]
             return p_hat, x[self.seasonal + self.p + self.q:]
 
     def plot_predicted_vs_actual(self, x):
@@ -111,4 +116,3 @@ if __name__ == '__main__':
     arima.fit(train)
     arima.plot_predicted_vs_actual(test)
     print arima.mase(test)
-    
