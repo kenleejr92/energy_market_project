@@ -66,13 +66,16 @@ class MLP(object):
             y = np.exp(y + self.test_past[self.look_back + self.forecast_horizon:])
             y_pred = self.scaler.inverse_transform(y_pred)
             y = self.scaler.inverse_transform(y)
-        print y_pred.shape
         mae = np.mean(np.abs(y_pred-y))
         trivial = np.mean(np.abs(y[self.forecast_horizon:] - y[:-self.forecast_horizon]))
-        print 'MAE:', mae
-        print 'MASE:', mae/trivial
-        plt.plot(y_pred, label='predicted', color='b')
-        plt.plot(y, label='actual', color='r')
+        print 'Test MAE:', mae
+        print 'Test MASE:', mae/trivial
+
+        return predicted, actual
+
+    def plot_predicted_vs_actual(self, predicted, actual)
+        plt.plot(predicted, label='predicted', color='b')
+        plt.plot(actual, label='actual', color='r')
         plt.legend()
         plt.show()
 

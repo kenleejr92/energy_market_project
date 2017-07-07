@@ -6,14 +6,8 @@ from ercot_data_interface import ercot_data_interface
 from sklearn.preprocessing import MinMaxScaler
 import matplotlib.pyplot as plt
 from ops import * 
-
-
-LOG_DIR = '/home/kenleejr92/energy_market_project/scripts/WaveNet/tmp'
-SAVE_PATH = LOG_DIR + '/WaveNet'
-TRAIN_LOG = LOG_DIR + '/train'
-VAL_LOG = LOG_DIR + '/val'
-
-
+import os
+import shutil
 
 def weight_variable(shape, Name):
     initial = tf.truncated_normal(shape, stddev=0.1)
@@ -80,7 +74,19 @@ class WaveNet(object):
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
         self.sequence_length = self.receptive_field + 1
         self.histograms = True
-        self.random_seed = tf.set_random_seed(22943)
+        self.random_seed = 22943
+        self.create_dirs()
+
+    def create_dirs(self):
+        self.log_dir = './' + str(self.random_seed)
+        if not os.path.exists(self.log_dir):
+            os.makedirs(self.log_dir)
+        self.train_log = self.log_dir + '/train'
+        self.val_log = self.log_dir + '/val'
+        self.save_path = self.log_dir + '/WaveNet'
+
+    def delete_dirs(self):
+        shutil.rmtree(self.log_dir)
 
 
     def calculate_receptive_field(self, filter_width, dilations):
@@ -526,8 +532,8 @@ class WaveNet(object):
 
 
     def restore_model(self, tf_session, global_step):
-        new_saver = tf.train.import_meta_graph(SAVE_PATH + '-' + str(global_step-1) + '.meta')
-        new_saver.restore(tf_session, tf.train.latest_checkpoint(LOG_DIR))
+        new_saver = tf.train.import_meta_graph(self.save_path + '-' + str(global_step-1) + '.meta')
+        new_saver.restore(tf_session, tf.train.latest_checkpoint(self.log_dir))
         self.prediction = tf.get_collection('prediction')
         self.target_output = tf.get_collection('target_output')
         self.MAE = tf.get_collection('MAE')
@@ -584,14 +590,14 @@ class WaveNet(object):
         tf_session = tf.Session()
         x_ = self.create_placeholders()
         self.MAE, self.MASE, self.target_output, self.prediction = self.loss(x_)
-
+        tf.set_random_seed(self.random_seed)
         merged = tf.summary.merge_all()
         train_step = tf.train.AdamOptimizer(1e-4).minimize(self.MAE)
         init_op = tf.global_variables_initializer()
         tf_session.run(init_op)
         tf_saver = tf.train.Saver()
-        train_writer = tf.summary.FileWriter(TRAIN_LOG, tf_session.graph)
-        val_writer = tf.summary.FileWriter(VAL_LOG, tf_session.graph)
+        train_writer = tf.summary.FileWriter(self.train_log, tf_session.graph)
+        val_writer = tf.summary.FileWriter(self.val_log, tf_session.graph)
         sequences = self.time_series_to_sequences(time_series, self.log_difference, parallel=False)
         print 'input shape:', sequences.shape
         num_sequences = sequences.shape[self.batch_index]
@@ -640,16 +646,18 @@ class WaveNet(object):
             trivial = np.mean(np.abs(actual_val[1:] - actual_val[:-1]))
             print 'Val MAE:', mae
             print 'Val MASE:', mae/trivial
-            tf_saver.save(tf_session, SAVE_PATH, global_step=e)
+            tf_saver.save(tf_session, self.save_path, global_step=e)
 
 
-    def predict_one_time_step(self, time_series, batch_size, log_difference, global_step=10):
+
+    def predict_one_time_step(self, time_series, batch_size, log_difference, global_step=10, tf_session=None):
         self.batch_size = batch_size
         self.log_difference = log_difference
         self.set_parameters(time_series)
         sequences = self.time_series_to_sequences(time_series, self.log_difference, parallel=False)
-        tf_session = tf.Session()
-        self.restore_model(tf_session, global_step)
+        if tf_session is None:
+            tf_session = tf.Session()
+            self.restore_model(tf_session, global_step)
         predicted, actual = self.inference_batches_to_series(tf_session, 
                                                                 sequences, 
                                                                 self.batch_index, 
@@ -663,37 +671,25 @@ class WaveNet(object):
                                                                 writer = None,
                                                                 epoch=None)
 
-        plt.plot(predicted, label='predicted', color='b')
-        plt.plot(actual, label='actual', color='r')
-        plt.legend()
-        plt.show()
-        mae = np.mean(np.abs(predicted - actual))
-        trivial = np.mean(np.abs(actual[self.forecast_horizon:] - actual[:-self.forecast_horizon]))
-        print 'Test MAE:', mae
-        print 'Test MASE:', mae/trivial
 
         if self.log_difference == True:
             predicted, actual = self.inverse_transform(predicted, actual)
-
-        print actual.shape
         mae = np.mean(np.abs(predicted - actual))
         trivial = np.mean(np.abs(actual[self.forecast_horizon:] - actual[:-self.forecast_horizon]))
         print 'Test MAE:', mae
         print 'Test MASE:', mae/trivial
-        plt.plot(predicted, label='predicted', color='b')
-        plt.plot(actual, label='actual', color='r')
-        plt.legend()
-        plt.show()
+        
         return predicted, actual
 
 
-    def predict_n_time_steps(self, time_series, n, batch_size, log_difference, global_step=10):
+    def predict_n_time_steps(self, time_series, n, batch_size, log_difference, global_step=10, tf_session=None):
         self.batch_size = batch_size
         self.log_difference = self.log_difference
         self.set_parameters(time_series)
         sequences = self.time_series_to_sequences(time_series, self.log_difference, parallel=False)
-        tf_session = tf.Session()
-        self.restore_model(tf_session, global_step)
+        if tf_session is None:
+            tf_session = tf.Session()
+            self.restore_model(tf_session, global_step)
         predicted = []
         actual = []
         for i in np.arange(0, sequences.shape[self.batch_index], self.batch_size):
@@ -727,13 +723,24 @@ class WaveNet(object):
 
         mae = np.mean(np.abs(predicted[:-n] - actual[n:]))
         mase = mae/np.mean(np.abs(predicted[:-n] - predicted[n:]))
-        print 'MAE:', mae
-        print 'MASE:', mase
-        plt.plot(predicted, label='predicted', color='b')
-        plt.plot(actual[n:], label='actual', color='r')
-        plt.legend()
-        plt.show()
+        print 'Test MAE:', mae
+        print 'Test MASE:', mase
+        return predicted, actual
 
+
+    def plot_predicted_vs_actual(self, time_series, n, batch_size, log_difference, global_step=10):
+        if n > 1:
+            predicted, actual = self.predict_n_time_steps(time_series, n, batch_size, log_difference, global_step)
+            plt.plot(predicted, label='predicted', color='b')
+            plt.plot(actual, label='actual', color='r')
+            plt.legend()
+            plt.show()
+        else:
+            predicted, actual = self.predict_one_time_step(time_series, batch_size, log_difference, global_step)
+            plt.plot(predicted, label='predicted', color='b')
+            plt.plot(actual, label='actual', color='r')
+            plt.legend()
+            plt.show()
 
 
 
@@ -744,10 +751,11 @@ if __name__ == '__main__':
     sources_sinks = ercot.get_sources_sinks()
     node0 = ercot.all_nodes[0]
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
-    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=True)
-    wavenet = WaveNet(MIMO=True, forecast_horizon=1)
+    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
+    wavenet = WaveNet(MIMO=False, forecast_horizon=1)
     wavenet.train(train, batch_size=128, log_difference=True, epochs=10)
     predicted1, actual1 = wavenet.predict_one_time_step(test, batch_size=128, log_difference=True, global_step=9)
+    wavenet.delete_dirs()
 
 
 

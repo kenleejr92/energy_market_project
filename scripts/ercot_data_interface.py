@@ -205,9 +205,10 @@ if __name__ == '__main__':
     ercot = ercot_data_interface()
     sources_sinks = ercot.get_sources_sinks()
     try:
-        nn = ercot.get_nearest_CRR_neighbors(sources_sinks[20])
-        train, test = ercot.get_train_test(nn[0], include_seasonal_vectors=False)
+        nn = ercot.get_nearest_CRR_neighbors(sources_sinks[150])
+        train, test = ercot.get_train_test(nn, include_seasonal_vectors=False)
         plt.plot(train)
+        plt.legend()
         plt.show()
     except Exception as error:
         print(repr(error))
