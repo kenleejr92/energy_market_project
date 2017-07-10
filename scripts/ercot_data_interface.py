@@ -169,7 +169,7 @@ class ercot_data_interface(object):
             return CRR_nodes
 
 
-    def get_train_test(self, node, normalize=True, include_seasonal_vectors=True, log_difference=False):
+    def get_train_test(self, node, normalize=False, include_seasonal_vectors=False, log_difference=False):
         X = self.query_prices(node, '2011-01-01', '2016-5-23')
         datetimes = X.index
         X = X.as_matrix()

@@ -36,9 +36,6 @@ class MLP(object):
         X = np.squeeze(np.array(X))
         train_stop = int(self.train_fraction*X.shape[0])
         X = X[:train_stop]
-        val = y[train_stop:]
-        plt.plot(val)
-        plt.show()
         y = np.reshape(np.array(y[:train_stop]), (-1,))
         self.MLP.fit(X, y)
 

@@ -601,7 +601,7 @@ class WaveNet(object):
                     actual = np.vstack((actual, a))
         return predicted, actual
 
-    def train(self, time_series, batch_size, max_epochs, tolerance = 0.01, train_fraction=0.8):
+    def train(self, time_series, batch_size, max_epochs, tolerance=0.01, train_fraction=0.8):
         self.epochs = max_epochs
         self.batch_size = batch_size
         self.train_fraction = train_fraction
@@ -800,7 +800,6 @@ class WaveNet(object):
                 last_stats['HITS'] = HITS
                 continue
             else:
-                print 'gain:', np.abs(last_stats['mae'] - mae)
                 if np.abs(last_stats['mae'] - mae) < tolerance:
                     break
                 last_stats['mae'] = mae
@@ -855,7 +854,7 @@ if __name__ == '__main__':
     sources_sinks = ercot.get_sources_sinks()
     node0 = ercot.all_nodes[0]
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
-    train, test = ercot.get_train_test(nn[0], normalize=False, include_seasonal_vectors=False)
+    train, test = ercot.get_train_test(nn, normalize=False, include_seasonal_vectors=False)
     wavenet = WaveNet(forecast_horizon=1, 
                         log_difference=False, 
                         initial_filter_width=2, 
@@ -866,7 +865,8 @@ if __name__ == '__main__':
                         use_biases=True, 
                         use_batch_norm=True, 
                         dilations=[1, 2, 4, 8, 16, 32, 64, 128], 
-                        random_seed=1234)
+                        random_seed=1234,
+                        MIMO=True)
     wavenet.train_and_predict(train, test, batch_size=128, max_epochs=10, plot=True, train_fraction=0.8)
     
 

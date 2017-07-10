@@ -84,7 +84,7 @@ class ARIMA(object):
             y_hat = self.linear_regression.predict(X)
             y_hat = np.expand_dims(y_hat, 1)
             if self.log_difference == True:
-                return y_hat, y[self.d + self.p:]
+                return y_hat, y[self.p:]
             else:
                 p_hat = y_hat + x[self.p:-self.d]
                 return p_hat, x[self.d + self.p:]
@@ -96,7 +96,7 @@ class ARIMA(object):
             y_hat = y_hat[self.q:] + error_term
             y_hat = np.expand_dims(y_hat, 1)
             if self.log_difference == True:
-                return y_hat, y[self.d + self.p + self.q:]
+                return y_hat, y[self.p:]
             else:
                 p_hat = y_hat + x[self.p+self.q:-self.d]
                 return p_hat, x[self.d + self.p + self.q:]
@@ -110,6 +110,8 @@ class ARIMA(object):
 
 
     def print_statistics(self, predicted, actual):
+        if len(actual.shape)==1:
+            actual = np.expand_dims(actual, 1)
         mae = np.mean(np.abs(predicted - actual))
         trivial = np.mean(np.abs(actual[1:] - actual[:-1]))
         print 'MAE:', mae
@@ -128,7 +130,7 @@ if __name__ == '__main__':
     node0 = ercot.all_nodes[0]
     train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
     
-    arima = ARIMA(p=2, d=1, q=2, log_difference=True)
+    arima = ARIMA(p=2, d=1, q=2, log_difference=False)
     arima.fit(train)
     arima.plot_predicted_vs_actual(test)
     predicted, actual = arima.predict(test)
