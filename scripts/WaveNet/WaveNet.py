@@ -9,8 +9,8 @@ from ops import *
 import os
 import shutil
 
-def weight_variable(shape, Name):
-    initial = tf.truncated_normal(shape, stddev=0.1)
+def weight_variable(shape, Name, seed):
+    initial = tf.truncated_normal(shape, stddev=0.1, seed=seed)
     return tf.Variable(initial, name=Name)
 
 
@@ -44,37 +44,50 @@ def variable_summaries(var):
 class WaveNet(object):
     '''
     WaveNet for time series
-    self.sequence_length: length of sequence input into network
     self.initial_filter_width: filter width for first causal convolution
+        2
     self.filter_width: filter width for dilated convolutions
+        2
     self.residual_channels: how many filters for parameterized for residual skip connections
+        32
     self.dilation_channels: how many filters for each dilation layer
-    self.output_channels: how many output channels (1 for single output, n for MIMO)
+        32
     self.skip_channels: how many filters for parameterized skip connections
+        256
     self.use_biases: whether to use biasing in the network
     self.use_batch_norm: batch normalization before each convolutional layer
     self.dilations : list of dilation factors
+        [1, 2, 4, 8, 16, 32, 64, 128]
     self.num_condition_series: how many series to condition on
     self.histograms: record histograms
     '''
-    def __init__(self, forecast_horizon, MIMO=False):
+    def __init__(self, forecast_horizon,
+                        log_difference, 
+                        initial_filter_width, 
+                        filter_width, 
+                        residual_channels, 
+                        dilation_channels, 
+                        skip_channels,
+                        use_biases,
+                        use_batch_norm,
+                        dilations,
+                        random_seed,
+                        MIMO=False):
         self.forecast_horizon = forecast_horizon
-        self.log_difference = None
-        self.epochs = 10
-        self.batch_size = 128
-        self.initial_filter_width = 2
-        self.filter_width = 2
-        self.residual_channels = 32
-        self.dilation_channels = 32
+        self.log_difference = log_difference
+        self.initial_filter_width = initial_filter_width
+        self.filter_width = filter_width
+        self.residual_channels = residual_channels
+        self.dilation_channels = dilation_channels
         self.MIMO = MIMO
-        self.skip_channels = 256
-        self.use_biases = True
-        self.use_batch_norm = False
-        self.dilations = [1, 2, 4, 8, 16, 32, 64, 128]
+        self.skip_channels = skip_channels
+        self.use_biases = use_biases
+        self.use_batch_norm = use_batch_norm
+        self.dilations = dilations
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
         self.sequence_length = self.receptive_field + 1
         self.histograms = True
-        self.random_seed = 22943
+        self.random_seed = random_seed
         self.create_dirs()
 
     def create_dirs(self):
@@ -152,15 +165,15 @@ class WaveNet(object):
         with tf.variable_scope('causal_layer_par'):
             for j in range(self.num_condition_series):
                 with tf.variable_scope('causal_layer'):
-                    layer['filter{}'.format(j)] = weight_variable([self.initial_filter_width, initial_channels, self.residual_channels], 'filter{}'.format(j))
+                    layer['filter{}'.format(j)] = weight_variable([self.initial_filter_width, initial_channels, self.residual_channels], 'filter{}'.format(j), self.random_seed)
                     var['causal_layer'] = layer
 
                 
                 with tf.variable_scope('first_dilation'):
                     current = dict()
-                    current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter')
-                    current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense')
-                    current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip')
+                    current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter', self.random_seed)
+                    current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense', self.random_seed)
+                    current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip', self.random_seed)
 
 
                     if self.use_biases:
@@ -181,9 +194,9 @@ class WaveNet(object):
                 if i == 0: var['dilated_stack'].append(None)
                 with tf.variable_scope('layer{}'.format(i+1)):
                     current = dict()
-                    current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter')
-                    current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense')
-                    current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip')
+                    current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter', self.random_seed)
+                    current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense', self.random_seed)
+                    current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip', self.random_seed)
 
 
                     if self.use_biases:
@@ -200,7 +213,7 @@ class WaveNet(object):
 
         with tf.variable_scope('postprocessing_par'):
             current = dict()
-            current['postprocess'] = weight_variable([1, self.skip_channels, self.output_channels], 'postprocess')
+            current['postprocess'] = weight_variable([1, self.skip_channels, self.output_channels], 'postprocess', self.random_seed)
             if self.use_biases:
                 current['postprocess_bias'] = bias_variable([self.output_channels], 'postprocess_bias')
             var['postprocessing'] = current
@@ -217,7 +230,7 @@ class WaveNet(object):
 
         with tf.variable_scope('causal_layer'):
             layer = dict()
-            layer['filter'] = weight_variable([self.initial_filter_width, initial_channels, self.residual_channels], 'filter')
+            layer['filter'] = weight_variable([self.initial_filter_width, initial_channels, self.residual_channels], 'filter', self.random_seed)
             var['causal_layer'] = layer
 
                 
@@ -226,9 +239,9 @@ class WaveNet(object):
             for i, dilation in enumerate(self.dilations):
                 with tf.variable_scope('layer{}'.format(i)):
                     current = dict()
-                    current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter')
-                    current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense')
-                    current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip')
+                    current['filter'] = weight_variable([self.filter_width, self.residual_channels, self.dilation_channels], 'filter', self.random_seed)
+                    current['dense'] = weight_variable([1, self.dilation_channels, self.residual_channels], 'dense', self.random_seed)
+                    current['skip'] = weight_variable([1, self.dilation_channels, self.skip_channels], 'skip', self.random_seed)
 
 
                     if self.use_biases:
@@ -246,7 +259,7 @@ class WaveNet(object):
 
         with tf.variable_scope('postprocessing'):
                 current = dict()
-                current['postprocess'] = weight_variable([1, self.skip_channels, self.output_channels], 'postprocess')
+                current['postprocess'] = weight_variable([1, self.skip_channels, self.output_channels], 'postprocess', self.random_seed)
                 if self.use_biases:
                     current['postprocess_bias'] = bias_variable([self.output_channels], 'postprocess_bias')
                 var['postprocessing'] = current
@@ -301,7 +314,7 @@ class WaveNet(object):
                 filter_scaler = variables['filter_scale']
                 filter_offset = variables['filter_offset']
                 batch_mean, batch_var = tf.nn.moments(input_batch, [0])
-                batch_normalized = tf.nn.batch_normalization(input_batch, batch_mean, batch_var, filter_offset, filter_scaler, 0.001)
+                batch_normalized = tf.nn.batch_normalization(input_batch, batch_mean, batch_var, filter_offset, filter_scaler, 0.0001)
                 conv_filter = causal_conv(batch_normalized, weights_filter, dilation)
             else:
                 conv_filter = causal_conv(input_batch, weights_filter, dilation)
@@ -320,7 +333,7 @@ class WaveNet(object):
                     filter_scaler = variables['filter_scale']
                     filter_offset = variables['filter_offset']
                     batch_mean, batch_var = tf.nn.moments(input_batch[j], [0])
-                    batch_normalized = tf.nn.batch_normalization(input_batch[j], batch_mean, batch_var, filter_offset, filter_scaler, 0.001)
+                    batch_normalized = tf.nn.batch_normalization(input_batch[j], batch_mean, batch_var, filter_offset, filter_scaler, 0.0001)
                     conv_filter = causal_conv(batch_normalized, weights_filter, dilation)
                 else:
                     conv_filter = causal_conv(input_batch[j], weights_filter, dilation)
@@ -573,18 +586,25 @@ class WaveNet(object):
                     writer.add_summary(summary, int(epoch*sequences.shape[batch_index]/batch_size) + i)
             p, a = tf_session.run([prediction, target_output], feed_dict=inf_feed)
             if i==0:
-                predicted = p[0]
-                actual = a[0]
+                if place_holder is None:
+                    predicted = p[0]
+                    actual = a[0]
+                else:
+                    predicted = p
+                    actual = a
             else:
-                predicted = np.vstack((predicted, p[0]))
-                actual = np.vstack((actual, a[0]))
+                if place_holder is None:
+                    predicted = np.vstack((predicted, p[0]))
+                    actual = np.vstack((actual, a[0]))
+                else:
+                    predicted = np.vstack((predicted, p))
+                    actual = np.vstack((actual, a))
         return predicted, actual
 
-    def train(self, time_series, batch_size, log_difference, epochs, train_fraction=0.8):
-        self.epochs = epochs
+    def train(self, time_series, batch_size, max_epochs, tolerance = 0.01, train_fraction=0.8):
+        self.epochs = max_epochs
         self.batch_size = batch_size
         self.train_fraction = train_fraction
-        self.log_difference = log_difference
         self.set_parameters(time_series)
 
         tf_session = tf.Session()
@@ -610,7 +630,8 @@ class WaveNet(object):
             train_x = sequences[:, 0:train_stop, :, :]
             val_x = sequences[:, train_stop:, :, :]
 
-        for e in range(epochs):
+        last_stats = {}
+        for e in range(max_epochs):
             print 'step{}:'.format(e)
             predicted_train, actual_train = self.inference_batches_to_series(tf_session, 
                                                                             train_x, 
@@ -636,28 +657,33 @@ class WaveNet(object):
                                                                         merged=merged,
                                                                         writer=val_writer,
                                                                         epoch=e)
+            print 'Train Stats:'
+            self.print_statistics(predicted_train, actual_train)
+            print 'Val Stats:'
+            mae, mase, HITS = self.print_statistics(predicted_val, actual_val)
             
-            mae = np.mean(np.abs(predicted_train - actual_train))
-            trivial = np.mean(np.abs(actual_train[1:] - actual_train[:-1]))
-            print 'Train MAE:', mae
-            print 'Train MASE:', mae/trivial
+            if e==0:
+                last_stats['mae'] = mae
+                last_stats['mase'] = mase
+                last_stats['HITS'] = HITS
+                continue
+            else:
+                if np.abs(last_stats['mae'] - mae) < tolerance:
+                    break
+                last_stats['mae'] = mae
+                last_stats['mase'] = mase
+                last_stats['HITS'] = HITS
 
-            mae = np.mean(np.abs(predicted_val - actual_val))
-            trivial = np.mean(np.abs(actual_val[1:] - actual_val[:-1]))
-            print 'Val MAE:', mae
-            print 'Val MASE:', mae/trivial
             tf_saver.save(tf_session, self.save_path, global_step=e)
 
 
 
-    def predict_one_time_step(self, time_series, batch_size, log_difference, global_step=10, tf_session=None):
+    def predict_one_time_step(self, time_series, batch_size, global_step=10):
+        tf_session = tf.Session()
+        self.restore_model(tf_session, global_step)
         self.batch_size = batch_size
-        self.log_difference = log_difference
         self.set_parameters(time_series)
         sequences = self.time_series_to_sequences(time_series, self.log_difference, parallel=False)
-        if tf_session is None:
-            tf_session = tf.Session()
-            self.restore_model(tf_session, global_step)
         predicted, actual = self.inference_batches_to_series(tf_session, 
                                                                 sequences, 
                                                                 self.batch_index, 
@@ -670,26 +696,16 @@ class WaveNet(object):
                                                                 merged = None,
                                                                 writer = None,
                                                                 epoch=None)
-
-
-        if self.log_difference == True:
-            predicted, actual = self.inverse_transform(predicted, actual)
-        mae = np.mean(np.abs(predicted - actual))
-        trivial = np.mean(np.abs(actual[self.forecast_horizon:] - actual[:-self.forecast_horizon]))
-        print 'Test MAE:', mae
-        print 'Test MASE:', mae/trivial
-        
+        print 'Test Stats:'
+        self.print_statistics(predicted, actual)
         return predicted, actual
 
 
-    def predict_n_time_steps(self, time_series, n, batch_size, log_difference, global_step=10, tf_session=None):
+    def predict_n_time_steps(self, time_series, n, batch_size, global_step=10):
+        tf_session = tf.Session()
+        self.restore_model(tf_session, global_step)
         self.batch_size = batch_size
-        self.log_difference = self.log_difference
         self.set_parameters(time_series)
-        sequences = self.time_series_to_sequences(time_series, self.log_difference, parallel=False)
-        if tf_session is None:
-            tf_session = tf.Session()
-            self.restore_model(tf_session, global_step)
         predicted = []
         actual = []
         for i in np.arange(0, sequences.shape[self.batch_index], self.batch_size):
@@ -718,32 +734,120 @@ class WaveNet(object):
                 predicted = np.vstack((predicted, p[0]))
                 actual = np.vstack((actual, a[0]))
 
-        if self.log_difference == True:
-            predicted, actual = self.inverse_transform(predicted, actual)
-
-        mae = np.mean(np.abs(predicted[:-n] - actual[n:]))
-        mase = mae/np.mean(np.abs(predicted[:-n] - predicted[n:]))
-        print 'Test MAE:', mae
-        print 'Test MASE:', mase
+        self.print_statistics(predicted, actual)
         return predicted, actual
 
+    def train_and_predict(self, train, test, batch_size, max_epochs, tolerance=0.01, plot=False, train_fraction=0.8):
+        self.epochs = max_epochs
+        self.batch_size = batch_size
+        self.train_fraction = train_fraction
+        self.set_parameters(train)
 
-    def plot_predicted_vs_actual(self, time_series, n, batch_size, log_difference, global_step=10):
-        if n > 1:
-            predicted, actual = self.predict_n_time_steps(time_series, n, batch_size, log_difference, global_step)
-            plt.plot(predicted, label='predicted', color='b')
-            plt.plot(actual, label='actual', color='r')
-            plt.legend()
-            plt.show()
-        else:
-            predicted, actual = self.predict_one_time_step(time_series, batch_size, log_difference, global_step)
-            plt.plot(predicted, label='predicted', color='b')
-            plt.plot(actual, label='actual', color='r')
-            plt.legend()
-            plt.show()
+        tf_session = tf.Session()
+        x_ = self.create_placeholders()
+        self.MAE, self.MASE, self.target_output, self.prediction = self.loss(x_)
+        tf.set_random_seed(self.random_seed)
+        train_step = tf.train.AdamOptimizer(1e-4).minimize(self.MAE)
+        init_op = tf.global_variables_initializer()
+        tf_session.run(init_op)
+        sequences_train = self.time_series_to_sequences(train, self.log_difference, parallel=False)
+        test_x = self.time_series_to_sequences(test, self.log_difference, parallel=False)
+        num_sequences = sequences_train.shape[self.batch_index]
+        train_stop = int(self.train_fraction*num_sequences)
+
+        if self.num_condition_series is None:
+            train_x = sequences_train[0:train_stop]
+            val_x = sequences_train[train_stop:]
+        else: 
+            train_x = sequences_train[:, 0:train_stop, :, :]
+            val_x = sequences_train[:, train_stop:, :, :]
+
+        last_stats = {}
+        for e in range(max_epochs):
+            print 'step{}:'.format(e)
+            predicted_train, actual_train = self.inference_batches_to_series(tf_session, 
+                                                                            train_x, 
+                                                                            self.batch_index, 
+                                                                            self.batch_size, 
+                                                                            self.num_condition_series, 
+                                                                            self.prediction, 
+                                                                            self.target_output, 
+                                                                            train_step = train_step, 
+                                                                            place_holder=x_, 
+                                                                            merged=None,
+                                                                            writer=None,
+                                                                            epoch=e)
+            predicted_val, actual_val = self.inference_batches_to_series(tf_session, 
+                                                                        val_x, 
+                                                                        self.batch_index, 
+                                                                        self.batch_size, 
+                                                                        self.num_condition_series, 
+                                                                        self.prediction, 
+                                                                        self.target_output, 
+                                                                        train_step = None, 
+                                                                        place_holder=x_,
+                                                                        merged=None,
+                                                                        writer=None,
+                                                                        epoch=e)
+            print 'Train Stats:'
+            self.print_statistics(predicted_train, actual_train)
+            print 'Val Stats:'
+            mae, mase, HITS = self.print_statistics(predicted_val, actual_val)
+            
+            if e==0:
+                last_stats['mae'] = mae
+                last_stats['mase'] = mase
+                last_stats['HITS'] = HITS
+                continue
+            else:
+                print 'gain:', np.abs(last_stats['mae'] - mae)
+                if np.abs(last_stats['mae'] - mae) < tolerance:
+                    break
+                last_stats['mae'] = mae
+                last_stats['mase'] = mase
+                last_stats['HITS'] = HITS
 
 
 
+        predicted_test, actual_test = self.inference_batches_to_series(tf_session, 
+                                                                            test_x, 
+                                                                            self.batch_index, 
+                                                                            self.batch_size, 
+                                                                            self.num_condition_series, 
+                                                                            self.prediction, 
+                                                                            self.target_output, 
+                                                                            train_step = None, 
+                                                                            place_holder=x_, 
+                                                                            merged=None,
+                                                                            writer=None,
+                                                                            epoch=None)
+        print 'Test Stats:'
+        self.print_statistics(predicted_test, actual_test)
+        if plot==True:
+            self.plot_predicted_vs_actual(predicted_test, actual_test)
+        self.delete_dirs()
+
+
+
+
+    def plot_predicted_vs_actual(self, predicted, actual):
+        plt.plot(predicted, label='predicted', color='b')
+        plt.plot(actual, label='actual', color='r')
+        plt.legend()
+        plt.show()
+        
+
+    def print_statistics(self, predicted, actual):
+        mae = np.mean(np.abs(predicted - actual))
+        trivial = np.mean(np.abs(actual[self.forecast_horizon:] - actual[:-self.forecast_horizon]))
+        print 'MAE:', mae
+        print 'Trivial MAE:', trivial
+        mase = mae/trivial
+        print 'MASE:', mase
+        hits = (predicted[1:] - predicted[:-1])*(actual[1:] - actual[:-1]) > 0
+        HITS = np.mean(np.abs(predicted[1:][hits]))
+        print 'HITS:', HITS
+        return mae, mase, HITS
 
 
 if __name__ == '__main__':
@@ -751,11 +855,20 @@ if __name__ == '__main__':
     sources_sinks = ercot.get_sources_sinks()
     node0 = ercot.all_nodes[0]
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
-    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
-    wavenet = WaveNet(MIMO=False, forecast_horizon=1)
-    wavenet.train(train, batch_size=128, log_difference=True, epochs=10)
-    predicted1, actual1 = wavenet.predict_one_time_step(test, batch_size=128, log_difference=True, global_step=9)
-    wavenet.delete_dirs()
+    train, test = ercot.get_train_test(nn[0], normalize=False, include_seasonal_vectors=False)
+    wavenet = WaveNet(forecast_horizon=1, 
+                        log_difference=False, 
+                        initial_filter_width=2, 
+                        filter_width=2, 
+                        residual_channels=32, 
+                        dilation_channels=32, 
+                        skip_channels=256, 
+                        use_biases=True, 
+                        use_batch_norm=True, 
+                        dilations=[1, 2, 4, 8, 16, 32, 64, 128], 
+                        random_seed=1234)
+    wavenet.train_and_predict(train, test, batch_size=128, max_epochs=10, plot=True, train_fraction=0.8)
+    
 
 
 

@@ -38,12 +38,14 @@ def plot_autocorrelations(x, max_lag=24):
 
 class ARIMA(object):
 
-    def __init__(self, p=2, d=0, q=2, seasonal=24):
+    def __init__(self, p=2, d=24, q=2, log_difference=True):
         self.linear_regression = None
         self.d = d
         self.q = q
         self.p = p
-        self.seasonal = seasonal
+        self.log_difference = log_difference
+        if self.log_difference == True:
+            self.d = 1
 
     def make_lag_matrix(self, v, p):
         X = []
@@ -62,21 +64,30 @@ class ARIMA(object):
 
     def fit(self, x):
         self.linear_regression = LinearRegression()
-        v = x[self.seasonal:] - x[:-self.seasonal]
+        if self.log_difference == True:
+            v = np.log(x[self.d:]) - np.log(x[:-self.d])
+        else:
+            v = x[self.d:] - x[:-self.d]
         X = self.make_lag_matrix(v, self.p)
         y = np.squeeze(v[self.p:])
         self.linear_regression.fit(X, y)
 
 
     def predict(self, x):
-        v = x[self.seasonal:] - x[:-self.seasonal]
+        if self.log_difference == True:
+            v = np.log(x[self.d:]) - np.log(x[:-self.d])
+        else:
+            v = x[self.d:] - x[:-self.d]
         y = np.squeeze(v[self.p:])
         X = self.make_lag_matrix(v, self.p)
         if self.q == 0:
             y_hat = self.linear_regression.predict(X)
             y_hat = np.expand_dims(y_hat, 1)
-            p_hat = y_hat + x[self.p:-self.seasonal]
-            return p_hat, x[self.seasonal + self.p:]
+            if self.log_difference == True:
+                return y_hat, y[self.d + self.p:]
+            else:
+                p_hat = y_hat + x[self.p:-self.d]
+                return p_hat, x[self.d + self.p:]
         else:
             y_hat = self.linear_regression.predict(X)
             errors = y_hat - y
@@ -84,24 +95,29 @@ class ARIMA(object):
             error_term = np.sum(E, axis=1)
             y_hat = y_hat[self.q:] + error_term
             y_hat = np.expand_dims(y_hat, 1)
-            p_hat = y_hat + x[self.p+self.q:-self.seasonal]
-            return p_hat, x[self.seasonal + self.p + self.q:]
+            if self.log_difference == True:
+                return y_hat, y[self.d + self.p + self.q:]
+            else:
+                p_hat = y_hat + x[self.p+self.q:-self.d]
+                return p_hat, x[self.d + self.p + self.q:]
 
     def plot_predicted_vs_actual(self, x):
         p_hat, z = self.predict(x)
-        plt.plot(z, label='actual')
-        plt.plot(p_hat, label='predicted')
+        plt.plot(z, label='actual', color='r')
+        plt.plot(p_hat, label='predicted', color='b')
         plt.legend()
         plt.show()
 
 
-    def mae(self, x):
-        p_hat, z = self.predict(x)
-        return np.mean(np.abs(p_hat-z))
-
-    def mase(self, x):
-        p_hat, z = self.predict(x)
-        return np.mean(np.abs(p_hat-z))/np.mean(np.abs(z[1:]-z[:-1]))
+    def print_statistics(self, predicted, actual):
+        mae = np.mean(np.abs(predicted - actual))
+        trivial = np.mean(np.abs(actual[1:] - actual[:-1]))
+        print 'MAE:', mae
+        print 'Trivial MAE:', trivial
+        print 'MASE:', mae/trivial
+        hits = (predicted[1:] - predicted[:-1])*(actual[1:] - actual[:-1]) > 0
+        HITS = np.mean(np.abs(predicted[1:][hits]))
+        print 'HITS:', HITS
 
 
 if __name__ == '__main__':
@@ -110,9 +126,10 @@ if __name__ == '__main__':
     sources_sinks = ercot.get_sources_sinks()
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[5])
     node0 = ercot.all_nodes[0]
-    train, test = ercot.get_train_test(node0, normalize=True, include_seasonal_vectors=False)
+    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
     
-    arima = ARIMA(p=2, d=0, q=2, seasonal=24)
+    arima = ARIMA(p=2, d=1, q=2, log_difference=True)
     arima.fit(train)
     arima.plot_predicted_vs_actual(test)
-    print arima.mase(test)
+    predicted, actual = arima.predict(test)
+    arima.print_statistics(predicted, actual)
