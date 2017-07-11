@@ -75,10 +75,12 @@ class MLP(object):
         trivial = np.mean(np.abs(actual[self.forecast_horizon:] - actual[:-self.forecast_horizon]))
         print 'MAE:', mae
         print 'Trivial MAE:', trivial
-        print 'MASE:', mae/trivial
+	mase = mae/trivial
+        print 'MASE:', mase
         hits = (predicted[1:] - predicted[:-1])*(actual[1:] - actual[:-1]) > 0
         HITS = np.mean(np.abs(predicted[1:][hits]))
         print 'HITS:', HITS
+	return mae, mase, HITS
     
     
 

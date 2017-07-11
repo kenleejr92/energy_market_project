@@ -821,10 +821,11 @@ class WaveNet(object):
                                                                             writer=None,
                                                                             epoch=None)
         print 'Test Stats:'
-        self.print_statistics(predicted_test, actual_test)
+        mae, mase, HITS = self.print_statistics(predicted_test, actual_test)
         if plot==True:
             self.plot_predicted_vs_actual(predicted_test, actual_test)
         self.delete_dirs()
+	return mae, mase, HITS
 
 
 
