@@ -825,6 +825,7 @@ class WaveNet(object):
         if plot==True:
             self.plot_predicted_vs_actual(predicted_test, actual_test)
         self.delete_dirs()
+        tf_session.close()
 	return mae, mase, HITS
 
 
@@ -855,7 +856,7 @@ if __name__ == '__main__':
     sources_sinks = ercot.get_sources_sinks()
     node0 = ercot.all_nodes[0]
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
-    train, test = ercot.get_train_test(nn, normalize=False, include_seasonal_vectors=False)
+    train, test = ercot.get_train_test(nn[0], normalize=False, include_seasonal_vectors=False)
     wavenet = WaveNet(forecast_horizon=1, 
                         log_difference=False, 
                         initial_filter_width=2, 
@@ -867,7 +868,7 @@ if __name__ == '__main__':
                         use_batch_norm=True, 
                         dilations=[1, 2, 4, 8, 16, 32, 64, 128], 
                         random_seed=1234,
-                        MIMO=True)
+                        MIMO=False)
     wavenet.train_and_predict(train, test, batch_size=128, max_epochs=10, plot=True, train_fraction=0.8)
     
 
