@@ -10,7 +10,7 @@ import os
 import shutil
 
 def weight_variable(shape, Name, seed):
-    initial = tf.truncated_normal(shape, stddev=0.1, seed=seed)
+    initial = tf.truncated_normal(shape, stddev=0.1, seed=seed, name=Name)
     return tf.Variable(initial, name=Name)
 
 
@@ -601,7 +601,7 @@ class WaveNet(object):
                     actual = np.vstack((actual, a))
         return predicted, actual
 
-    def train(self, time_series, batch_size, max_epochs, tolerance=0.01, train_fraction=0.8):
+    def train(self, time_series, batch_size, max_epochs, tolerance=0.001, train_fraction=0.8):
         self.epochs = max_epochs
         self.batch_size = batch_size
         self.train_fraction = train_fraction
@@ -662,17 +662,17 @@ class WaveNet(object):
             print 'Val Stats:'
             mae, mase, HITS = self.print_statistics(predicted_val, actual_val)
             
-            if e==0:
-                last_stats['mae'] = mae
-                last_stats['mase'] = mase
-                last_stats['HITS'] = HITS
-                continue
-            else:
-                if np.abs(last_stats['mae'] - mae) < tolerance:
-                    break
-                last_stats['mae'] = mae
-                last_stats['mase'] = mase
-                last_stats['HITS'] = HITS
+            # if e==0:
+            #     last_stats['mae'] = mae
+            #     last_stats['mase'] = mase
+            #     last_stats['HITS'] = HITS
+            #     continue
+            # else:
+            #     if np.abs(last_stats['mae'] - mae) < tolerance:
+            #         break
+            #     last_stats['mae'] = mae
+            #     last_stats['mase'] = mase
+            #     last_stats['HITS'] = HITS
 
             tf_saver.save(tf_session, self.save_path, global_step=e)
 
@@ -737,7 +737,7 @@ class WaveNet(object):
         self.print_statistics(predicted, actual)
         return predicted, actual
 
-    def train_and_predict(self, train, test, batch_size, max_epochs, tolerance=0.01, plot=False, train_fraction=0.8):
+    def train_and_predict(self, train, test, batch_size, max_epochs, tolerance=0.001, plot=False, train_fraction=0.8):
         self.epochs = max_epochs
         self.batch_size = batch_size
         self.train_fraction = train_fraction
@@ -794,17 +794,17 @@ class WaveNet(object):
             print 'Val Stats:'
             mae, mase, HITS = self.print_statistics(predicted_val, actual_val)
             
-            if e==0:
-                last_stats['mae'] = mae
-                last_stats['mase'] = mase
-                last_stats['HITS'] = HITS
-                continue
-            else:
-                if np.abs(last_stats['mae'] - mae) < tolerance:
-                    break
-                last_stats['mae'] = mae
-                last_stats['mase'] = mase
-                last_stats['HITS'] = HITS
+            # if e==0:
+            #     last_stats['mae'] = mae
+            #     last_stats['mase'] = mase
+            #     last_stats['HITS'] = HITS
+            #     continue
+            # else:
+            #     if np.abs(last_stats['mae'] - mae) < tolerance:
+            #         break
+            #     last_stats['mae'] = mae
+            #     last_stats['mase'] = mase
+            #     last_stats['HITS'] = HITS
 
 
 
@@ -832,8 +832,8 @@ class WaveNet(object):
 
 
     def plot_predicted_vs_actual(self, predicted, actual):
-        plt.plot(predicted, label='predicted', color='b')
         plt.plot(actual, label='actual', color='r')
+        plt.plot(predicted, label='predicted', color='b')
         plt.legend()
         plt.show()
         
@@ -856,20 +856,20 @@ if __name__ == '__main__':
     sources_sinks = ercot.get_sources_sinks()
     node0 = ercot.all_nodes[0]
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
-    train, test = ercot.get_train_test(nn[0], normalize=False, include_seasonal_vectors=False)
+    train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
     wavenet = WaveNet(forecast_horizon=1, 
-                        log_difference=False, 
-                        initial_filter_width=2, 
+                        log_difference=True, 
+                        initial_filter_width=48, 
                         filter_width=2, 
-                        residual_channels=32, 
-                        dilation_channels=32, 
-                        skip_channels=256, 
+                        residual_channels=64, 
+                        dilation_channels=64, 
+                        skip_channels=64, 
                         use_biases=True, 
-                        use_batch_norm=True, 
-                        dilations=[1, 2, 4, 8, 16, 32, 64, 128], 
+                        use_batch_norm=False, 
+                        dilations=[1, 2, 4, 8, 16, 32, 64], 
                         random_seed=1234,
                         MIMO=False)
-    wavenet.train_and_predict(train, test, batch_size=128, max_epochs=10, plot=True, train_fraction=0.8)
+    wavenet.train_and_predict(train, test, batch_size=128, max_epochs=15, plot=True, train_fraction=0.8)
     
 
 

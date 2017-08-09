@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from ercot_data_interface import ercot_data_interface
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import Ridge
 
 
 def difference(x, lag):
@@ -63,7 +63,7 @@ class ARIMA(object):
         return X
 
     def fit(self, x):
-        self.linear_regression = LinearRegression()
+        self.linear_regression = Ridge()
         if self.log_difference == True:
             v = np.log(x[self.d:]) - np.log(x[:-self.d])
         else:
@@ -132,7 +132,7 @@ if __name__ == '__main__':
     node0 = ercot.all_nodes[0]
     train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
     
-    arima = ARIMA(p=2, d=1, q=2, log_difference=False)
+    arima = ARIMA(p=2, d=1, q=2, log_difference=True)
     arima.fit(train)
     arima.plot_predicted_vs_actual(test)
     predicted, actual = arima.predict(test)
