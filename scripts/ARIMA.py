@@ -3,7 +3,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from ercot_data_interface import ercot_data_interface
+
 from sklearn.linear_model import Ridge
+from sklearn.preprocessing import MinMaxScaler
+
 
 
 def difference(x, lag):
@@ -65,6 +68,8 @@ class ARIMA(object):
     def fit(self, x):
         self.linear_regression = Ridge()
         if self.log_difference == True:
+            self.scaler = MinMaxScaler((1, np.max(x)))
+            x = self.scaler.fit_transform(x)
             v = np.log(x[self.d:]) - np.log(x[:-self.d])
         else:
             v = x[self.d:] - x[:-self.d]
@@ -75,6 +80,8 @@ class ARIMA(object):
 
     def predict(self, x):
         if self.log_difference == True:
+            self.scaler = MinMaxScaler((1, np.max(x)))
+            x = self.scaler.fit_transform(x)
             v = np.log(x[self.d:]) - np.log(x[:-self.d])
         else:
             v = x[self.d:] - x[:-self.d]
