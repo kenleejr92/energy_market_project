@@ -199,6 +199,9 @@ class ercot_data_interface(object):
             test = np.log(test[1:]) - np.log(test[:-1])
         return train, test
 
+    def get_price_series(self, node):
+        return self.query_prices(node, '2011-01-01', '2016-5-23').as_matrix()
+
 
 
 if __name__ == '__main__':

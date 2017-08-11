@@ -85,7 +85,6 @@ class WaveNet(object):
         self.use_batch_norm = use_batch_norm
         self.dilations = dilations
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
-        self.sequence_length = self.receptive_field + 1
         self.histograms = True
         self.random_seed = random_seed
         self.create_dirs()
@@ -107,6 +106,7 @@ class WaveNet(object):
         Final receptive field for model
         '''
         receptive_field = (filter_width - 1) * sum(dilations) + self.initial_filter_width
+
         print 'Receptive Field Size:', receptive_field
         return receptive_field
 
@@ -348,8 +348,8 @@ class WaveNet(object):
         out = tf.nn.relu(conv_filter)
 
         weights_dense = variables['dense']
-        transformed = tf.nn.conv1d(
-            out, weights_dense, stride=1, padding="SAME", name="dense")
+        # transformed = tf.nn.conv1d(
+        #     out, weights_dense, stride=1, padding="SAME", name="dense")
 
         # The 1x1 conv to produce the skip output
         skip_cut = tf.shape(out)[1] - output_width
@@ -361,7 +361,7 @@ class WaveNet(object):
         if self.use_biases:
             dense_bias = variables['dense_bias']
             skip_bias = variables['skip_bias']
-            transformed = transformed + dense_bias
+            out = out + dense_bias
             skip_contribution = skip_contribution + skip_bias
 
         if self.histograms:
@@ -378,16 +378,16 @@ class WaveNet(object):
                 tf.summary.histogram(layer + '_biases_skip', skip_bias)
 
         if self.num_condition_series is None or layer_index > 0:
-            input_cut = tf.shape(input_batch)[1] - tf.shape(transformed)[1]
+            input_cut = tf.shape(input_batch)[1] - tf.shape(out)[1]
             input_batch = tf.slice(input_batch, [0, input_cut, 0], [-1, -1, -1])
-            return skip_contribution, input_batch + transformed
+            return skip_contribution, input_batch + out
 
         else:
             for j in range(self.num_condition_series):
-                input_cut = tf.shape(input_batch[j])[1] - tf.shape(transformed)[1]
+                input_cut = tf.shape(input_batch[j])[1] - tf.shape(out)[1]
                 condition = tf.slice(input_batch[j], [0, input_cut, 0], [-1, -1, -1])
-                transformed = transformed + condition
-            return skip_contribution, transformed
+                out = out + condition
+            return skip_contribution, out
 
 
     def create_network(self, input_batch):
@@ -404,9 +404,9 @@ class WaveNet(object):
             current_layer = self._create_causal_layer(current_layer)
 
         if self.num_condition_series is None:
-            output_width = tf.shape(input_batch)[1] - self.receptive_field + 1
+            output_width = tf.shape(input_batch)[1] - self.receptive_field
         else:
-            output_width = tf.shape(input_batch[0])[1] - self.receptive_field + 1
+            output_width = tf.shape(input_batch[0])[1] - self.receptive_field
 
 
         # Add all defined dilation layers.
@@ -497,43 +497,37 @@ class WaveNet(object):
     def loss(self, input_batch, l2_regularization_strength=False):
         # Cut off the last n samples of network input to preserve causality.
         if self.num_condition_series is None:
-            batch_size = tf.shape(input_batch)[0]
-            encoded = tf.reshape(input_batch, [batch_size, -1, self.output_channels])
-            network_input = tf.reshape(input_batch, [batch_size, -1, self.output_channels])
-            network_input_width = tf.shape(network_input)[1] - 1
-            network_input = tf.slice(network_input, [0, 0, 0], [-1, network_input_width, -1])
+            encoded = tf.reshape(input_batch, [1, -1, self.output_channels])
+            network_input = tf.reshape(input_batch, [1, -1, self.output_channels])
+            network_input =network_input[:, :-1, :]
             raw_output = self.create_network(network_input)
         else:
-            batch_size = tf.shape(input_batch)[1]
-            encoded = tf.reshape(input_batch[0, :, :, :], [batch_size, -1, 1])
-            condition_input = tf.reshape(input_batch, [self.num_condition_series, batch_size, -1, 1])
+            encoded = tf.reshape(input_batch[0, :, :, :], [1, -1, 1])
+            condition_input = tf.reshape(input_batch, [self.num_condition_series, 1, -1, 1])
             network_input_width = tf.shape(condition_input)[2] - 1
-            network_input = tf.slice(condition_input, [0, 0, 0, 0], [-1, -1, network_input_width, -1])
+            network_input = tf.slice(condition_input, [0, 0, 0, 0], [1, -1, network_input_width, -1])
             raw_output = self.create_network(network_input)
 
         with tf.name_scope('loss'):
             # Cut off the samples corresponding to the receptive field
             # for the first predicted sample.
-            target_output = tf.slice(tf.reshape(encoded, [batch_size, -1, self.output_channels]), [0, self.receptive_field, 0], [-1, -1, -1])
+            target_output = tf.reshape(encoded, [1, -1, self.output_channels])[:, self.receptive_field+1:, :]
             target_output = tf.reshape(target_output, [-1, self.output_channels])
             prediction = tf.reshape(raw_output, [-1, self.output_channels])
 
             #Mean Absolte Error
             loss = tf.reduce_mean(tf.abs(target_output - prediction))
-            MASE = loss / tf.reduce_mean(tf.abs(encoded[:, 1:, :] - encoded[:, :-1, :]))
             tf.add_to_collection('prediction', prediction)
             tf.add_to_collection('target_output', target_output)
             tf.add_to_collection('MAE', loss)
-            tf.add_to_collection('MASE', MASE)
 
             tf.summary.scalar('MAE', loss)
-            tf.summary.scalar('MASE', MASE)
 
             if l2_regularization_strength == False:
-                return loss, MASE, target_output, prediction
+                return loss, encoded, network_input, target_output, prediction
             else:
                 # L2 regularization for all trainable parameters
-                l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if not('bias' in v.name)])
+                l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in tf.trainable_variables() if not('bias' in v.name) or not('scale' in v.name) or not('offset' in v.name)])
 
                 # Add the regularization term to the loss
                 total_loss = (loss + l2_regularization_strength * l2_loss)
@@ -541,7 +535,7 @@ class WaveNet(object):
                 tf.summary.scalar('l2_loss', l2_loss)
                 tf.summary.scalar('total_loss', total_loss)
 
-                return total_loss, MASE, target_output, prediction
+                return total_loss, encoded, network_input, target_output, prediction
 
 
     def restore_model(self, tf_session, global_step):
@@ -605,11 +599,13 @@ class WaveNet(object):
         self.epochs = max_epochs
         self.batch_size = batch_size
         self.train_fraction = train_fraction
+        self.sequence_length = time_series.shape[0] + self.receptive_field
         self.set_parameters(time_series)
+
 
         tf_session = tf.Session()
         x_ = self.create_placeholders()
-        self.MAE, self.MASE, self.target_output, self.prediction = self.loss(x_)
+        self.MAE, self.encoded, self.network_input, self.target_output, self.prediction = self.loss(x_)
         tf.set_random_seed(self.random_seed)
         merged = tf.summary.merge_all()
         train_step = tf.train.AdamOptimizer(1e-4).minimize(self.MAE)
@@ -618,63 +614,20 @@ class WaveNet(object):
         tf_saver = tf.train.Saver()
         train_writer = tf.summary.FileWriter(self.train_log, tf_session.graph)
         val_writer = tf.summary.FileWriter(self.val_log, tf_session.graph)
-        sequences = self.time_series_to_sequences(time_series, self.log_difference, parallel=False)
-        print 'input shape:', sequences.shape
-        num_sequences = sequences.shape[self.batch_index]
-        train_stop = int(self.train_fraction*num_sequences)
+        time_series = np.pad(time_series, ((self.receptive_field, 0), (0,0)), 'constant', constant_values=((0, 0), (0,0)))
+        time_series = np.expand_dims(time_series, 0)
 
-        if self.num_condition_series is None:
-            train_x = sequences[0:train_stop]
-            val_x = sequences[train_stop:]
-        else: 
-            train_x = sequences[:, 0:train_stop, :, :]
-            val_x = sequences[:, train_stop:, :, :]
-
-        last_stats = {}
         for e in range(max_epochs):
-            print 'step{}:'.format(e)
-            predicted_train, actual_train = self.inference_batches_to_series(tf_session, 
-                                                                            train_x, 
-                                                                            self.batch_index, 
-                                                                            self.batch_size, 
-                                                                            self.num_condition_series, 
-                                                                            self.prediction, 
-                                                                            self.target_output, 
-                                                                            train_step = train_step, 
-                                                                            place_holder=x_, 
-                                                                            merged=merged,
-                                                                            writer=train_writer,
-                                                                            epoch=e)
-            predicted_val, actual_val = self.inference_batches_to_series(tf_session, 
-                                                                        val_x, 
-                                                                        self.batch_index, 
-                                                                        self.batch_size, 
-                                                                        self.num_condition_series, 
-                                                                        self.prediction, 
-                                                                        self.target_output, 
-                                                                        train_step = None, 
-                                                                        place_holder=x_,
-                                                                        merged=merged,
-                                                                        writer=val_writer,
-                                                                        epoch=e)
-            print 'Train Stats:'
-            self.print_statistics(predicted_train, actual_train)
-            print 'Val Stats:'
-            mae, mase, HITS = self.print_statistics(predicted_val, actual_val)
-            
-            # if e==0:
-            #     last_stats['mae'] = mae
-            #     last_stats['mase'] = mase
-            #     last_stats['HITS'] = HITS
-            #     continue
-            # else:
-            #     if np.abs(last_stats['mae'] - mae) < tolerance:
-            #         break
-            #     last_stats['mae'] = mae
-            #     last_stats['mase'] = mase
-            #     last_stats['HITS'] = HITS
-
-            tf_saver.save(tf_session, self.save_path, global_step=e)
+            print 'step{}:'.format(e) 
+            tf_session.run(train_step, feed_dict={x_: time_series})
+            p, a = tf_session.run([self.prediction, self.target_output], feed_dict={x_: time_series})
+            self.print_statistics(p, a)
+        e, i, p, a = tf_session.run([self.encoded, self.network_input, self.prediction, self.target_output], feed_dict={x_: time_series})
+        print e.shape
+        print i.shape
+        print p.shape
+        print a.shape
+        self.plot_predicted_vs_actual(p, a)
 
 
 
@@ -794,18 +747,6 @@ class WaveNet(object):
             print 'Val Stats:'
             mae, mase, HITS = self.print_statistics(predicted_val, actual_val)
             
-            # if e==0:
-            #     last_stats['mae'] = mae
-            #     last_stats['mase'] = mase
-            #     last_stats['HITS'] = HITS
-            #     continue
-            # else:
-            #     if np.abs(last_stats['mae'] - mae) < tolerance:
-            #         break
-            #     last_stats['mae'] = mae
-            #     last_stats['mase'] = mase
-            #     last_stats['HITS'] = HITS
-
 
 
         predicted_test, actual_test = self.inference_batches_to_series(tf_session, 
@@ -859,7 +800,7 @@ if __name__ == '__main__':
     train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
     wavenet = WaveNet(forecast_horizon=1, 
                         log_difference=True, 
-                        initial_filter_width=48, 
+                        initial_filter_width=2, 
                         filter_width=2, 
                         residual_channels=64, 
                         dilation_channels=64, 
@@ -869,8 +810,7 @@ if __name__ == '__main__':
                         dilations=[1, 2, 4, 8, 16, 32, 64], 
                         random_seed=1234,
                         MIMO=False)
-    wavenet.train_and_predict(train, test, batch_size=128, max_epochs=15, plot=True, train_fraction=0.8)
-    
+    wavenet.train(train, 20, 1000)
 
 
 

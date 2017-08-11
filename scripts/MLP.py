@@ -11,7 +11,7 @@ class MLP(object):
         self.log_difference = log_difference
         self.random_seed = random_seed
         self.MLP = MLPRegressor(random_state = self.random_seed, hidden_layer_sizes=(100,), activation="relu", shuffle=False, batch_size=1024, max_iter=200)
-        self.train_fraction = 0.6
+        self.train_fraction = 0.8
 
     def train(self, time_series, look_back=48):
         if self.log_difference == True:
@@ -91,7 +91,7 @@ if __name__ == '__main__':
     nn = ercot.get_nearest_CRR_neighbors(sources_sinks[100])
     train, test = ercot.get_train_test(node0, normalize=False, include_seasonal_vectors=False)
     mlp = MLP(random_seed=1234, log_difference=True, forecast_horizon=1)
-    mlp.train(train, look_back=175)
+    mlp.train(train, look_back=129)
     predicted, actual = mlp.predict(test)
     mlp.print_statistics(predicted, actual)
     mlp.plot_predicted_vs_actual(predicted, actual)
