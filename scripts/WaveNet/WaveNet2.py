@@ -6,8 +6,12 @@ from sklearn.preprocessing import MinMaxScaler
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
+import cPickle as pickle
 from ops import * 
-
+from MLP import MLP
+from statsmodels.tsa.stattools import acf
+from statsmodels.graphics.tsaplots import plot_acf
+from ARIMA import ARIMA
 
 
 #input = cut off last sample of time series
@@ -68,11 +72,11 @@ class WaveNet2(object):
         var = dict()
 
         # ########################Batch Normalization#######################
-        # with tf.variable_scope('batch_normalization'):
-        #     layer = dict()
-        #     layer['filter_scale'] = scale_variable([self.sequence_length-1, self.input_channels], 'BN_scaler')
-        #     layer['filter_offset'] = offset_variable([self.sequence_length-1, self.input_channels], 'BN_offset')
-        #     var['batch_norm'] = layer
+        with tf.variable_scope('batch_normalization'):
+            layer = dict()
+            layer['filter_scale'] = scale_variable([self.sequence_length-1, self.input_channels], 'BN_scaler')
+            layer['filter_offset'] = offset_variable([self.sequence_length-1, self.input_channels], 'BN_offset')
+            var['batch_norm'] = layer
 
         ########################Initial layer##############################
         with tf.variable_scope('causal_layer'):
@@ -91,6 +95,23 @@ class WaveNet2(object):
                     var['dilation_layer'].append(current)
 
 
+        var['residual_layer'] = list()
+        with tf.variable_scope('residual_layer'):
+            for i, dilation in enumerate(self.dilations):
+                with tf.variable_scope('layer{}'.format(i)):
+                    current = dict()
+                    current['filter'] = weight_variable([self.filter_width, self.dilation_channels, self.dilation_channels], 'filter', self.random_seed)
+                    var['residual_layer'].append(current)
+
+        var['skip_layer'] = list()
+        with tf.variable_scope('skip_layer'):
+            for i, dilation in enumerate(self.dilations):
+                with tf.variable_scope('layer{}'.format(i)):
+                    current = dict()
+                    current['filter'] = weight_variable([self.filter_width, self.dilation_channels, self.dilation_channels], 'filter', self.random_seed)
+                    var['skip_layer'].append(current)
+
+
         with tf.variable_scope('linear_layer'):
             layer = dict()
             layer['linear_filter'] = weight_variable([1, self.dilation_channels, self.output_channels], 'linear', self.random_seed)
@@ -99,6 +120,50 @@ class WaveNet2(object):
         return var
 
 
+    def create_causal_layer(self, input):
+        self.stack_variables = self.create_stack_variables()
+        causal_layer_filter = self.stack_variables['causal_layer']['filter']
+        current = causal_conv(input, causal_layer_filter, 1)
+        return current
+
+
+    def create_dilation_stack(self, input, layer_index, dilation, output_width):
+        self.stack_variables = self.create_stack_variables()
+
+        if self.batch_norm == True:
+            batch_norm_scaler = self.stack_variables['batch_norm']['filter_scale']
+            batch_norm_offset = self.stack_variables['batch_norm']['filter_offset']
+            batch_mean, batch_var = tf.nn.moments(input, [1])
+            input = tf.nn.batch_normalization(input, batch_mean, batch_var, batch_norm_offset, batch_norm_scaler, 0.0001)
+
+        dilation_filter = self.stack_variables['dilation_layer'][layer_index]['filter']
+        current = causal_conv(input, dilation_filter, dilation)
+        current = tf.nn.relu(current)
+        residual_weights = self.stack_variables['residual_layer'][layer_index]['filter']
+        residual_output = tf.nn.conv1d(current, residual_weights, stride=1, padding="SAME", name="residual")
+        skip_weights = self.stack_variables['skip_layer'][layer_index]['filter']
+        skip_contrib = tf.nn.conv1d(current, skip_weights, stride=1, padding="SAME", name="skip")
+        skip_cut = tf.shape(current)[1] - output_width
+        skip_contrib = skip_contrib[:, skip_cut:, :]
+        input_cut = tf.shape(input)[1] - tf.shape(current)[1]
+        input = input[:, input_cut:, :]
+        return skip_contrib, input + residual_output
+
+
+    def create_network2(self, input):
+        current = input
+        output_width = tf.shape(current[:, self.receptive_field-1:, :])[1]
+        skip_contribs = []
+        current = self.create_causal_layer(current)
+        for i, d in enumerate(self.dilations):
+            skip_contrib, current = self.create_dilation_stack(current, i, d, output_width)
+            skip_contribs.append(skip_contrib)
+        skip_contribs = tf.stack(skip_contribs, axis=0)
+        output = tf.reduce_sum(skip_contribs, axis=[0])
+        linear_filter = self.stack_variables['linear']['linear_filter']
+        output = tf.nn.conv1d(output, linear_filter, stride=1, padding="SAME")
+
+        return output
 
     def create_network(self, input):
         self.stack_variables = self.create_stack_variables()
@@ -111,13 +176,16 @@ class WaveNet2(object):
 
         causal_layer_filter = self.stack_variables['causal_layer']['filter']
         current = causal_conv(input, causal_layer_filter, 1)
+       
+
         for layer_index, dilation in enumerate(self.dilations):
             dilation_filter = self.stack_variables['dilation_layer'][layer_index]['filter']
             current = causal_conv(current, dilation_filter, dilation)
-
         current = tf.nn.relu(current)
 
         linear_filter = self.stack_variables['linear']['linear_filter']
+
+        
         output = tf.nn.conv1d(current, linear_filter, stride=1, padding="SAME")
 
         return output
@@ -137,6 +205,7 @@ class WaveNet2(object):
         time_series = np.pad(time_series, ((self.receptive_field, 0), (0,0)), 'constant', constant_values=((0, 0), (0,0)))
         train_stop = int(0.8*time_series.shape[0])
         train = time_series[:train_stop]
+        print train.shape
         test = time_series[train_stop:]
         self.sequence_length = train.shape[0]
         train = np.expand_dims(train, 0)
@@ -163,14 +232,19 @@ class WaveNet2(object):
             test_pred.append(y_pred[0][-1, :])
 
         test_pred = np.array(test_pred).reshape(-1, 1)
-        print_statistics(test_pred, test)
+        mae, mase, hits = print_statistics(test_pred, test)
         plot_predicted_vs_actual(test_pred, test)
+        tf_session.close()
+        return mae, mase, hits
 
 
 
 def plot_predicted_vs_actual(predicted, actual):
-    plt.plot(actual, label='actual', color='r')
-    plt.plot(predicted, label='predicted', color='b')
+    plt.plot(actual[211:], label='True')
+    print 'wavenet length', predicted.shape[0]
+    plt.plot(predicted[211:], label='WaveNet')
+    plt.xlabel('Hour')
+    plt.ylabel('$/MWh')
     plt.legend()
     plt.show()
 
@@ -189,21 +263,39 @@ def print_statistics(predicted, actual):
 
 
 if __name__ == '__main__':
-    ercot = ercot_data_interface()
-    node0 = ercot.all_nodes[0]
-    series = ercot.get_price_series(node0)
+    TEST_NODES = ['CAL_CALGT1', 'KING_KINGNW', 'MAR_MARSFOG1', 'CALAVER_JKS1', 'RAYB_G78910', 'WOO_WOODWRD1', 'DECKER_DPG2', 'CEL_CELANEG1', 'FO_FORMOSG3', 'NUE_NUECESG7']
+    test_node = TEST_NODES[0]
+    with open('/mnt/hdd1/ERCOT/' + test_node + '_train.pkl', 'r') as f2:
+        train = pickle.load(f2)
+    with open('/mnt/hdd1/ERCOT/' + test_node + '_test.pkl', 'r') as f2:
+        test = pickle.load(f2)
+    train_a = np.expand_dims(train[:, 0], 1)
+    test_a = np.expand_dims(test[:, 0], 1)
+    series = np.vstack((train_a, test_a))
+    mimo_series = np.vstack((train, test))
+    
     scaler = MinMaxScaler((1, np.max(series)))
     series = scaler.fit_transform(series)
     series = np.log(series[1:]) - np.log(series[:-1])
 
-    wavenet2 = WaveNet2(initial_filter_width=2, 
+    wavenet2 = WaveNet2(initial_filter_width=48, 
                         filter_width=2, 
                         dilation_channels=32, 
                         use_batch_norm=False,
                         dilations=[1, 2, 4, 8, 16, 32, 64],
                         random_seed=22943)
 
+    mlp = MLP(random_seed=1234, log_difference=True, forecast_horizon=1)
+    mlp.train(train_a, look_back=175)
+    predicted, actual = mlp.predict(test_a)
+    plt.plot(predicted, label='MLP')
+    print 'MLP length', predicted.shape[0]
 
-    
-    wavenet2.train(series, 1000)
+    arima = ARIMA(p=2, d=24, q=2, log_difference=True)
+    arima.fit(train_a)
+    predicted, actual = arima.predict(test_a)
+    plt.plot(predicted[148:], label='ARIMA')
+    print 'ARIMA length', predicted.shape[0]
+
+    wavenet2.train(series, 5000)
 

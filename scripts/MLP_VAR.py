@@ -10,7 +10,7 @@ class MLP_VAR(object):
         self.random_seed = random_seed
         self.log_difference = log_difference
         self.MLP = MLPRegressor(random_state = self.random_seed, hidden_layer_sizes=(100,), activation="relu", shuffle=False, batch_size=1024, max_iter=200)
-        self.train_fraction = 0.6
+        self.train_fraction = 0.8
 
     def train(self, time_series, look_back=2):
         if self.log_difference == True:

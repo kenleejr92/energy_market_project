@@ -1,4 +1,5 @@
 from MLP_VAR import MLP_VAR
+from MLP import MLP
 import matplotlib.pyplot as plt
 from ercot_data_interface import ercot_data_interface
 import numpy as np
@@ -20,21 +21,8 @@ if __name__ == '__main__':
             with open('/mnt/hdd1/ERCOT/' + test_node + '_test.pkl', 'r') as f2:
                 test = pickle.load(f2)
 
-            maes = []
-            mases = []
-            hitss = []
-            for r in random_seeds:
-                mlp = MLP_VAR(random_seed=r[0])
-                mlp.train(train, look_back=111)
-                predicted, actual = mlp.predict(test)
-                mae, mase, hits = mlp.print_statistics(predicted, actual)
-                maes.append(mae)
-                mases.append(mase)
-                hitss.append(hits)
-            mae_avg = np.mean(maes)
-            mae_sd = np.std(maes)
-            mase_avg = np.mean(mases)
-            mase_sd = np.std(mases)
-            hits_avg = np.mean(hitss)
-            hits_sd = np.std(hitss)
-            f1.write('%s\t%f+/-%f\t%f+/-%f\t%f+/-%f\n' % (test_node, mae_avg, mae_sd, mase_avg, mase_sd, hits_avg, hits_sd))
+            mlp = MLP_VAR(random_seed=random_seeds[0][0])
+            mlp.train(train, look_back=175)
+            predicted, actual = mlp.predict(test)
+            mae, mase, hits = mlp.print_statistics(predicted, actual)
+            f1.write('%s\t%f\t%f\t%f\n' % (test_node, mae, mase, hits))
