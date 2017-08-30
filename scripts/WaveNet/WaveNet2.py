@@ -147,7 +147,7 @@ class WaveNet2(object):
         #cutoff last sample
         output = self.create_network(input[:, :-self.forecast_horizon, :])
         target_output = tf.expand_dims(input[:, self.receptive_field+self.forecast_horizon-1:, 0], axis=2)
-        loss = tf.reduce_mean(tf.abs(output-target_output))
+        loss = tf.abs(output-target_output)
 
         return loss, output, target_output
 
@@ -218,7 +218,7 @@ def align_time_series(time_series):
 
 if __name__ == '__main__':
     TEST_NODES = ['CAL_CALGT1', 'KING_KINGNW', 'MAR_MARSFOG1', 'CALAVER_JKS1', 'RAYB_G78910', 'WOO_WOODWRD1', 'DECKER_DPG2', 'CEL_CELANEG1', 'FO_FORMOSG3', 'NUE_NUECESG7']
-    test_node = TEST_NODES[0]
+    test_node = TEST_NODES[1]
     with open('/mnt/hdd1/ERCOT/' + test_node + '_train.pkl', 'r') as f2:
         train = pickle.load(f2)
     with open('/mnt/hdd1/ERCOT/' + test_node + '_test.pkl', 'r') as f2:
@@ -240,17 +240,17 @@ if __name__ == '__main__':
                         dilation_channels=32, 
                         use_batch_norm=False,
                         dilations=[1, 2, 4, 8, 16, 32, 64],
-                        forecast_horizon=24,
+                        forecast_horizon=48,
                         random_seed=22943)
 
-    predicted1, actual1 = wavenet2.train(series, 1000)
-    mlp = MLP(random_seed=1234, log_difference=False, forecast_horizon=24)
+    predicted1, actual1 = wavenet2.train(mimo_series, 2000)
+    mlp = MLP(random_seed=1234, log_difference=False, forecast_horizon=1)
     mlp.train(train_a, look_back=175)
     predicted2, actual2 = mlp.predict(test_a)
     
 
 
-    arima = ARIMA(p=175, d=24, q=2, log_difference=False)
+    arima = ARIMA(p=175, d=24, q=174, log_difference=False)
     arima.fit(train_a)
     predicted3, actual3 = arima.predict(test_a)
 
@@ -258,8 +258,8 @@ if __name__ == '__main__':
    
     plt.plot(aligned[0], label='True')
     plt.plot(aligned[1], label='WaveNet')
-    plt.plot(aligned[2], label='MLP')
-    plt.plot(aligned[3], label='ARIMA')
+    # plt.plot(aligned[2], label='MLP')
+    # plt.plot(aligned[3], label='ARIMA')
     
     mae_wavenet = np.mean(np.abs(aligned[0]-aligned[1]))
     mae_mlp = np.mean(np.abs(aligned[0]-aligned[2]))
