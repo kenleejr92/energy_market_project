@@ -42,14 +42,12 @@ class WaveNet2(object):
     def __init__(self, initial_filter_width, 
                         filter_width, 
                         dilation_channels, 
-                        use_batch_norm,
                         dilations,
                         forecast_horizon,
                         random_seed):
         self.initial_filter_width = initial_filter_width
         self.filter_width = filter_width
         self.dilation_channels = dilation_channels
-        self.batch_norm = use_batch_norm
         self.dilations = dilations
         self.receptive_field = self.calculate_receptive_field(self.filter_width, self.dilations)
         self.random_seed = random_seed
@@ -174,8 +172,6 @@ class WaveNet2(object):
         for e in range(epochs):
             print 'step{}:'.format(e) 
             y_pred, y, _ = tf_session.run([self.output, self.target_output, train_step], feed_dict={x_: train})
-            print y_pred[0].shape
-            print y[0].shape
             print_statistics(y_pred[0], y[0], self.forecast_horizon)
 
         y_pred, y, _ = tf_session.run([self.output, self.target_output, train_step], feed_dict={x_: test})
@@ -227,7 +223,6 @@ if __name__ == '__main__':
     test_a = np.expand_dims(test[:, 0], 1)
     series = np.vstack((train_a, test_a))
     mimo_series = np.vstack((train, test))
-    
     # scaler = MinMaxScaler((1, np.max(series)))
     # series = scaler.fit_transform(series)
     # series = np.log(series[1:]) - np.log(series[:-1])
@@ -238,32 +233,31 @@ if __name__ == '__main__':
     wavenet2 = WaveNet2(initial_filter_width=48, 
                         filter_width=2, 
                         dilation_channels=32, 
-                        use_batch_norm=False,
                         dilations=[1, 2, 4, 8, 16, 32, 64],
-                        forecast_horizon=48,
+                        forecast_horizon=24,
                         random_seed=22943)
 
-    predicted1, actual1 = wavenet2.train(mimo_series, 2000)
-    mlp = MLP(random_seed=1234, log_difference=False, forecast_horizon=1)
-    mlp.train(train_a, look_back=175)
-    predicted2, actual2 = mlp.predict(test_a)
+    predicted1, actual1 = wavenet2.train(series, 1000)
+    mlp = MLP(look_back=175, random_seed=1234, log_difference=False, forecast_horizon=24)
+    predicted2, actual2 = mlp.train(mimo_series, epochs=1000)
     
 
 
     arima = ARIMA(p=175, d=24, q=174, log_difference=False)
     arima.fit(train_a)
     predicted3, actual3 = arima.predict(test_a)
+    print predicted1.shape, predicted2.shape
 
     aligned = align_time_series([actual1, predicted1, predicted2, predicted3])
    
     plt.plot(aligned[0], label='True')
     plt.plot(aligned[1], label='WaveNet')
-    # plt.plot(aligned[2], label='MLP')
+    plt.plot(aligned[2], label='MLP')
     # plt.plot(aligned[3], label='ARIMA')
     
-    mae_wavenet = np.mean(np.abs(aligned[0]-aligned[1]))
-    mae_mlp = np.mean(np.abs(aligned[0]-aligned[2]))
-    mae_arima = np.mean(np.abs(aligned[0]-aligned[3]))
+    mae_wavenet = np.sqrt(np.mean(np.square(aligned[0]-aligned[1])))
+    mae_mlp = np.sqrt(np.mean(np.square(aligned[0]-aligned[2])))
+    mae_arima = np.sqrt(np.mean(np.square(aligned[0]-aligned[3])))
     print mae_wavenet, mae_mlp, mae_arima
     plt.legend()
     plt.show()
